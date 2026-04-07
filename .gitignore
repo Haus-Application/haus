@@ -1,0 +1,11 @@
+node_modules/
+.nuxt/
+.output/
+frontend/dist/
+dist/
+haus
+haus.db
+haus.db-shm
+haus.db-wal
+.env
+.claude/
