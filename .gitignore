@@ -8,4 +8,3 @@ haus.db
 haus.db-shm
 haus.db-wal
 .env
-.claude/
