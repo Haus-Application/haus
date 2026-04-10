@@ -197,6 +197,15 @@ func (s *Scanner) run(session *ScanSession, subnet string) {
 	scanHostsARP(session, subnet)
 	emitStage(session, "arp", "complete", fmt.Sprintf("Found %d hosts", len(session.Devices)), len(session.Devices))
 
+	// Stage 1b: IPv6 neighbor discovery
+	emitStage(session, "ipv6", "running", "Discovering IPv6 neighbors...", 0)
+	scanIPv6Neighbors(session)
+	ipv6Count := 0
+	for _, d := range session.Devices {
+		ipv6Count += len(d.IPv6)
+	}
+	emitStage(session, "ipv6", "complete", fmt.Sprintf("Found %d IPv6 addresses", ipv6Count), ipv6Count)
+
 	// Stage 2: OUI enrichment
 	emitStage(session, "oui", "running", "Looking up manufacturers...", 0)
 	identified := enrichOUI(session)
@@ -349,6 +358,13 @@ func classify(session *ScanSession) {
 			device.Category = CategoryMedia
 			if device.DeviceType == "" {
 				device.DeviceType = "speaker"
+			}
+		case "Google":
+			if !hasProtocol(device, "cast") && device.Category == CategoryUnknown {
+				device.Category = CategorySmartHome
+				if device.DeviceType == "" {
+					device.DeviceType = "nest_device"
+				}
 			}
 		case "Apple":
 			device.Category = CategoryCompute

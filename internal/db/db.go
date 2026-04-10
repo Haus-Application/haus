@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -83,6 +84,15 @@ func Migrate(db *sql.DB) error {
 			device_type TEXT NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
+
+		CREATE TABLE IF NOT EXISTS google_tokens (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			access_token TEXT NOT NULL,
+			refresh_token TEXT NOT NULL,
+			token_type TEXT NOT NULL DEFAULT 'Bearer',
+			expiry DATETIME NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
 	return err
 }
@@ -147,6 +157,45 @@ func LoadDeviceCredential(db *sql.DB, ip string) (*DeviceCredential, error) {
 // DeleteHueConfig removes the stored Hue bridge configuration.
 func DeleteHueConfig(db *sql.DB) error {
 	_, err := db.Exec(`DELETE FROM hue_config WHERE id = 1`)
+	return err
+}
+
+// GoogleTokens holds OAuth2 tokens for the Google Nest SDM API.
+// Only one set of tokens per hub -- you don't need two identities
+// unless you're running from the SEC.
+type GoogleTokens struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time
+}
+
+// SaveGoogleTokens stores (or replaces) the Google OAuth tokens.
+// Single row, id=1. One set of credentials. No aliases.
+func SaveGoogleTokens(db *sql.DB, accessToken, refreshToken string, expiresAt time.Time) error {
+	_, err := db.Exec(`
+		INSERT OR REPLACE INTO google_tokens (id, access_token, refresh_token, token_type, expiry)
+		VALUES (1, ?, ?, 'Bearer', ?)
+	`, accessToken, refreshToken, expiresAt.UTC().Format(time.RFC3339))
+	return err
+}
+
+// LoadGoogleTokens loads the stored Google OAuth tokens, if any.
+func LoadGoogleTokens(db *sql.DB) (*GoogleTokens, error) {
+	var t GoogleTokens
+	var expiryStr string
+	err := db.QueryRow(`SELECT access_token, refresh_token, expiry FROM google_tokens WHERE id = 1`).
+		Scan(&t.AccessToken, &t.RefreshToken, &expiryStr)
+	if err != nil {
+		return nil, err
+	}
+	t.ExpiresAt, _ = time.Parse(time.RFC3339, expiryStr)
+	return &t, nil
+}
+
+// DeleteGoogleTokens removes stored Google OAuth tokens.
+// When the feds come knocking, you shred the evidence.
+func DeleteGoogleTokens(db *sql.DB) error {
+	_, err := db.Exec(`DELETE FROM google_tokens WHERE id = 1`)
 	return err
 }
 

@@ -95,6 +95,35 @@
         </div>
       </section>
 
+      <!-- Google Nest OAuth connect -->
+      <section v-if="isGoogleDevice && !googleConnected" class="setup-section">
+        <div class="setup-card">
+          <h3 class="setup-title">Connect Google Account</h3>
+          <p class="setup-desc">Sign in with your Google account to access your Nest cameras, thermostats, and doorbells through Haus.</p>
+          <a :href="'/api/google/auth'" class="setup-btn google-btn">
+            Sign in with Google
+          </a>
+        </div>
+      </section>
+
+      <!-- Google Nest connected — show devices -->
+      <section v-if="isGoogleDevice && googleConnected" class="controls-section">
+        <h2 class="section-title">Google Nest Devices</h2>
+        <div v-if="nestDevices.length === 0" class="controls-card">
+          <div class="control-row">
+            <span class="control-label">Loading Nest devices...</span>
+          </div>
+        </div>
+        <div v-else class="controls-card">
+          <div v-for="nd in nestDevices" :key="nd.name" class="control-row">
+            <div class="cap-info">
+              <span class="cap-name">{{ nd.displayName }}</span>
+              <span class="cap-desc">{{ nd.typeName }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Setup needed — link button or password -->
       <section v-if="probe?.setup_needed" class="setup-section">
         <div class="setup-card">
@@ -494,6 +523,47 @@ const deviceHint = computed(() => {
   }
 })
 
+// Google Nest integration
+const isGoogleDevice = computed(() => {
+  if (!device.value) return false
+  const mfr = (device.value.manufacturer || '').toLowerCase()
+  const name = (device.value.name || '').toLowerCase()
+  const hostname = (device.value.hostname || '').toLowerCase()
+  return mfr.includes('google') || mfr.includes('nest') ||
+    name.includes('nest') || hostname.includes('nest') ||
+    device.value.device_type === 'thread_border_router'
+})
+
+const googleConnected = ref(false)
+const nestDevices = ref<any[]>([])
+
+async function checkGoogleStatus() {
+  try {
+    const res = await fetch('/api/google/status')
+    if (res.ok) {
+      const data = await res.json()
+      googleConnected.value = data.connected
+      if (data.connected) {
+        const devRes = await fetch('/api/google/devices')
+        if (devRes.ok) {
+          const devData = await devRes.json()
+          nestDevices.value = (devData.devices || []).map((d: any) => ({
+            ...d,
+            displayName: d.traits?.['sdm.devices.traits.Info']?.customName ||
+              d.parentRelations?.[0]?.displayName || d.type?.split('.').pop() || 'Nest Device',
+            typeName: d.type?.split('.').pop()?.replace(/([A-Z])/g, ' $1').trim() || 'Unknown',
+          }))
+        }
+      }
+    }
+  } catch { /* server down */ }
+}
+
+// Check on hash change (Google redirects back with #google-connected)
+if (typeof window !== 'undefined' && window.location.hash === '#google-connected') {
+  window.location.hash = ''
+}
+
 const isConnected = computed(() => {
   if (!probe.value) return false
   return probe.value.status === 'connected'
@@ -543,6 +613,11 @@ onMounted(async () => {
   // Probe the device in real-time
   await runProbe()
   loading.value = false
+
+  // Check Google Nest connection status
+  if (isGoogleDevice.value) {
+    await checkGoogleStatus()
+  }
 })
 
 // JellyFish controls
@@ -655,6 +730,7 @@ watch(chatMessages, () => {
 .endpoints-summary:hover { color: var(--color-text); }
 .doc-link { display: inline-block; margin-top: 12px; font-size: 13px; color: var(--color-accent); text-decoration: none; }
 .doc-link:hover { text-decoration: underline; }
+.google-btn { display: inline-block; text-decoration: none; text-align: center; }
 
 .loading-state { text-align: center; padding: 80px 0; color: var(--color-text-secondary); display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .loader { width: 32px; height: 32px; border: 3px solid var(--color-surface-border); border-top-color: var(--color-accent); border-radius: 50%; animation: spin 0.8s linear infinite; }

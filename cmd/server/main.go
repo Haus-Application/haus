@@ -118,6 +118,11 @@ func main() {
 		HueClient:  hueClient,
 		HuePoller:  huePoller,
 		Concierge:  concierge,
+
+		// Google Nest SDM credentials -- George Sr. keeps these locked up tight.
+		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleProjectID:    os.Getenv("GOOGLE_PROJECT_ID"),
 	}
 
 	mux := http.NewServeMux()
@@ -148,6 +153,13 @@ func main() {
 	mux.HandleFunc("PUT /api/hue/rooms/{id}", server.HandleHueSetRoom)
 	mux.HandleFunc("GET /api/hue/scenes", server.HandleHueScenes)
 	mux.HandleFunc("POST /api/hue/scenes/{id}/activate", server.HandleHueActivateScene)
+
+	// Google Nest OAuth routes -- the front door, not the back.
+	mux.HandleFunc("GET /api/google/auth", server.HandleGoogleAuthStart)
+	mux.HandleFunc("GET /api/google/callback", server.HandleGoogleAuthCallback)
+	mux.HandleFunc("GET /api/google/status", server.HandleGoogleStatus)
+	mux.HandleFunc("DELETE /api/google/disconnect", server.HandleGoogleDisconnect)
+	mux.HandleFunc("GET /api/google/devices", server.HandleGoogleDevices)
 
 	// Chat route
 	mux.HandleFunc("POST /api/chat", server.HandleChat)

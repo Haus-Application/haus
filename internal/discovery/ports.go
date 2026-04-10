@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,7 +30,7 @@ func scanPorts(session *ScanSession) {
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				addr := fmt.Sprintf("%s:%d", dev.IP, p)
+				addr := formatAddr(dev.IP, p)
 				conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
 				if err != nil {
 					return
@@ -55,4 +56,15 @@ func scanPorts(session *ScanSession) {
 	}
 
 	log.Printf("[ports] Found %d open ports across all devices. I knocked on every door!", portsFound)
+}
+
+// formatAddr formats an IP:port address string, using brackets for IPv6.
+// IPv6 addresses contain colons, so they need to be wrapped in square
+// brackets per RFC 2732. Mother always said, "Wrap your addresses properly,
+// Buster."
+func formatAddr(ip string, port int) string {
+	if strings.Contains(ip, ":") {
+		return fmt.Sprintf("[%s]:%d", ip, port)
+	}
+	return fmt.Sprintf("%s:%d", ip, port)
 }

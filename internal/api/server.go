@@ -21,6 +21,11 @@ type Server struct {
 	HueClient  *hue.Client  // may be nil until paired
 	HuePoller  *hue.Poller  // may be nil until paired
 	Concierge  *ai.Concierge // may be nil if no API key configured
+
+	// Google Nest SDM OAuth config -- keep these close to the chest.
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleProjectID    string
 }
 
 // NewServer creates a new API server with the given dependencies.

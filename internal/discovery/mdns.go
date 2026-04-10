@@ -112,6 +112,28 @@ func processEntry(session *ScanSession, svcType string, entry *zeroconf.ServiceE
 		}
 	}
 
+	// Also try IPv6 addresses if we didn't find by IPv4
+	if device == nil {
+		for _, ip := range entry.AddrIPv6 {
+			ipStr := ip.String()
+			if d, ok := session.Devices[ipStr]; ok {
+				device = d
+				break
+			}
+		}
+	}
+
+	// If still no device but we have IPv6, create one
+	if device == nil && deviceIP == "" && len(entry.AddrIPv6) > 0 {
+		deviceIP = entry.AddrIPv6[0].String()
+		device = &Device{
+			IP:       deviceIP,
+			Category: CategoryUnknown,
+			Metadata: make(map[string]string),
+		}
+		session.Devices[deviceIP] = device
+	}
+
 	if device == nil && deviceIP != "" {
 		// New device discovered via mDNS that wasn't in ARP table
 		device = &Device{
@@ -124,6 +146,16 @@ func processEntry(session *ScanSession, svcType string, entry *zeroconf.ServiceE
 
 	if device == nil {
 		return
+	}
+
+	// For existing devices, add any IPv6 addresses from mDNS
+	if len(entry.AddrIPv6) > 0 {
+		for _, ip := range entry.AddrIPv6 {
+			ipStr := ip.String()
+			if !containsString(device.IPv6, ipStr) {
+				device.IPv6 = append(device.IPv6, ipStr)
+			}
+		}
 	}
 
 	// Add service to device's service list

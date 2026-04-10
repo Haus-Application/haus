@@ -2,6 +2,7 @@
 
 interface ScanDevice {
   ip: string
+  ipv6?: string[]
   mac: string
   hostname: string
   name: string
@@ -24,6 +25,7 @@ interface ScanStage {
 
 const STAGE_NAMES: Record<string, string> = {
   arp: 'Host Discovery',
+  ipv6: 'IPv6 Discovery',
   oui: 'Manufacturer Lookup',
   ports: 'Port Scan (nmap)',
   kasa: 'Kasa Devices',

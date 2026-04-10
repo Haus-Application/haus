@@ -16,7 +16,8 @@ const (
 // Device represents a discovered network device with all the details
 // Mother could ever want to know about it.
 type Device struct {
-	IP           string            `json:"ip"`
+	IP           string            `json:"ip"`             // primary (IPv4 preferred)
+	IPv6         []string          `json:"ipv6,omitempty"` // additional IPv6 addresses
 	MAC          string            `json:"mac"`
 	Hostname     string            `json:"hostname"`
 	Name         string            `json:"name"`
