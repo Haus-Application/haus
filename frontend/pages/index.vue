@@ -24,7 +24,6 @@
     <div v-if="status === 'scanning'" class="scan-fullscreen">
       <div class="scan-fox">
         <img src="~/assets/fox.png" alt="Haus scanning" class="fox-avatar scanning" />
-        <p class="fox-status">Scanning your network...</p>
       </div>
       <ScanProgress :stages="stages" />
     </div>
@@ -273,7 +272,8 @@ async function handleKasaBrightness({ ip, brightness }: { ip: string; brightness
 .fox-avatar {
   width: 280px;
   height: 280px;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: top;
   border-radius: 50%;
   filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
 }

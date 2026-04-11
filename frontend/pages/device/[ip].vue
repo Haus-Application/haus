@@ -13,6 +13,20 @@
     </div>
 
     <template v-if="device">
+      <!-- Camera feed (only for Google/Nest camera devices) -->
+      <div v-if="(cameraStreamActive || cameraLoading) && isGoogleDevice" class="camera-stream" style="margin-bottom:24px">
+        <!-- Video element always rendered so ref is bound before ontrack fires -->
+        <video ref="videoRef" autoplay playsinline muted class="camera-video" :class="{ hidden: !cameraStreamActive }" />
+        <div v-if="cameraLoading && !cameraStreamActive" class="camera-loading">
+          <div class="loader" />
+          <p>Connecting to camera...</p>
+        </div>
+        <div v-if="cameraStreamActive" class="stream-controls">
+          <span class="stream-status">Live</span>
+          <button class="speed-btn" @click="stopCameraStream">Stop</button>
+        </div>
+      </div>
+
       <!-- Device hero -->
       <div class="device-hero">
         <BrandLogo :brand="brandKey" :size="56" />
@@ -28,7 +42,10 @@
             <span v-if="device.model && device.device_type" class="meta-sep">·</span>
             <span v-if="device.device_type">{{ device.device_type }}</span>
           </div>
-          <div v-if="probe?.integration" class="hero-integration">
+          <div v-if="isGoogleDevice && googleConnected" class="hero-integration">
+            <span class="integration-pill int-google">Google Nest</span>
+          </div>
+          <div v-else-if="probe?.integration && probe.integration !== 'unknown'" class="hero-integration">
             <span class="integration-pill" :class="`int-${probe.integration}`">{{ probe.integration }}</span>
             <span v-if="!probe.reachable" class="unreachable-badge">unreachable</span>
           </div>
@@ -96,7 +113,7 @@
       </section>
 
       <!-- Google Nest OAuth connect -->
-      <section v-if="isGoogleDevice && !googleConnected" class="setup-section">
+      <section v-if="isGoogleDevice && googleChecked && !googleConnected" class="setup-section">
         <div class="setup-card">
           <h3 class="setup-title">Connect Google Account</h3>
           <p class="setup-desc">Sign in with your Google account to access your Nest cameras, thermostats, and doorbells through Haus.</p>
@@ -106,21 +123,46 @@
         </div>
       </section>
 
-      <!-- Google Nest connected — show devices -->
-      <section v-if="isGoogleDevice && googleConnected" class="controls-section">
-        <h2 class="section-title">Google Nest Devices</h2>
-        <div v-if="nestDevices.length === 0" class="controls-card">
-          <div class="control-row">
-            <span class="control-label">Loading Nest devices...</span>
-          </div>
-        </div>
-        <div v-else class="controls-card">
-          <div v-for="nd in nestDevices" :key="nd.name" class="control-row">
-            <div class="cap-info">
-              <span class="cap-name">{{ nd.displayName }}</span>
-              <span class="cap-desc">{{ nd.typeName }}</span>
+      <!-- Google Nest connected — show matched or selectable device -->
+      <section v-if="isGoogleDevice && googleConnected && nestDevices.length" class="controls-section">
+        <!-- If we matched a specific Nest device, show it -->
+        <template v-if="matchedNestDevice">
+          <h2 class="section-title">{{ matchedNestDevice.displayName }}</h2>
+          <div class="controls-card">
+            <div class="control-row">
+              <span class="control-label">Type</span>
+              <span class="info-value">{{ matchedNestDevice.typeName }}</span>
+            </div>
+            <div v-if="matchedNestDevice.isThermostat" class="control-row">
+              <span class="control-label">Temperature</span>
+              <span class="info-value">{{ matchedNestDevice.temperature }}°C</span>
+            </div>
+            <div v-if="matchedNestDevice.isThermostat" class="control-row">
+              <span class="control-label">Humidity</span>
+              <span class="info-value">{{ matchedNestDevice.humidity }}%</span>
+            </div>
+            <div v-if="matchedNestDevice.isThermostat" class="control-row">
+              <span class="control-label">Mode</span>
+              <span class="info-value">{{ matchedNestDevice.mode }}</span>
             </div>
           </div>
+        </template>
+
+        <!-- If no specific match, this is likely a Nest camera — let user pick -->
+        <template v-if="!matchedNestDevice && nestCameras.length">
+          <h2 class="section-title">Select Camera</h2>
+          <div class="controls-card">
+            <div v-for="cam in nestCameras" :key="cam.name" class="control-row" style="cursor:pointer" @click="selectedCameraStream = cam.streamId; startCameraStreamById(cam.streamId)">
+              <span class="control-label">{{ cam.displayName }}</span>
+              <span class="cap-status active" v-if="selectedCameraStream === cam.streamId">Streaming</span>
+              <span class="cap-status inactive" v-else>View</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- Stream error fallback -->
+        <div v-if="cameraStreamURL && !cameraStreamActive" class="camera-stream">
+          <p class="stream-info">{{ cameraStreamURL }}</p>
         </div>
       </section>
 
@@ -153,7 +195,7 @@
       </section>
 
       <!-- Offline / unreachable — but still show what we know -->
-      <section v-if="probe?.status === 'offline' || (probe?.status === 'discovered' && !probe?.fingerprints?.length)" class="setup-section">
+      <section v-if="!googleConnected && (probe?.status === 'offline' || (probe?.status === 'discovered' && !probe?.fingerprints?.length))" class="setup-section">
         <div class="offline-card">
           <h3 class="setup-title">{{ deviceHint ? deviceHint.title : 'Device Found on Network' }}</h3>
           <p class="setup-desc">
@@ -535,7 +577,172 @@ const isGoogleDevice = computed(() => {
 })
 
 const googleConnected = ref(false)
+const googleChecked = ref(false)
 const nestDevices = ref<any[]>([])
+const cameraStreamURL = ref('')
+const cameraStreamActive = ref(false)
+const cameraLoading = ref(false)
+const cameraToken = ref('')
+const videoRef = ref<HTMLVideoElement | null>(null)
+let peerConnection: RTCPeerConnection | null = null
+
+// Match THIS device to its Nest SDM counterpart by name/room
+const matchedNestDevice = computed(() => {
+  if (!nestDevices.value.length || !device.value) return null
+  const pageName = (device.value.name || '').toLowerCase()
+  // Try to match by display name containing the page device name or vice versa
+  const match = nestDevices.value.find((nd: any) => {
+    const ndName = (nd.displayName || '').toLowerCase()
+    return ndName && (pageName.includes(ndName) || ndName.includes(pageName) ||
+      pageName.includes(ndName.split(' ')[0]) || ndName.includes(pageName.split(' ')[0]))
+  })
+  return match || null
+})
+
+const selectedCameraStream = ref('')
+
+const nestCameras = computed(() => {
+  return nestDevices.value
+    .filter((d: any) => d.isCamera)
+    .map((d: any) => ({
+      ...d,
+      streamId: d.displayName.toLowerCase().replace(/\s+camera$/i, '').replace(/\s+/g, '_'),
+    }))
+})
+
+async function startCameraStreamById(streamId: string) {
+  cameraLoading.value = true
+  selectedCameraStream.value = streamId
+
+  try {
+    // Check available streams from go2rtc
+    const camRes = await fetch('/api/cameras')
+    if (camRes.ok) {
+      const cameras = await camRes.json()
+      const match = cameras.find((c: any) =>
+        c.id === streamId || streamId.includes(c.id) || c.id.includes(streamId.split('_')[0])
+      )
+      if (match) streamId = match.id
+    }
+
+    peerConnection = new RTCPeerConnection({ iceServers: [] })
+    peerConnection.addTransceiver('video', { direction: 'recvonly' })
+    peerConnection.addTransceiver('audio', { direction: 'recvonly' })
+
+    peerConnection.ontrack = (event) => {
+      if (videoRef.value && event.streams[0]) {
+        videoRef.value.srcObject = event.streams[0]
+        cameraStreamActive.value = true
+      }
+    }
+
+    const offer = await peerConnection.createOffer()
+    await peerConnection.setLocalDescription(offer)
+
+    const res = await fetch(`/api/cameras/${streamId}/webrtc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'offer', sdp: offer.sdp }),
+    })
+
+    if (!res.ok) throw new Error(`go2rtc returned ${res.status}`)
+    const answer = await res.json()
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer))
+  } catch (e: any) {
+    cameraStreamURL.value = `Stream error: ${e.message || 'unknown'}`
+    peerConnection?.close()
+    peerConnection = null
+  }
+  cameraLoading.value = false
+}
+
+async function startCameraStream() {
+  if (!matchedNestDevice.value) return
+  cameraLoading.value = true
+
+  // Map Nest device name to go2rtc stream ID
+  // go2rtc streams: "kitchen", "living_room", "loft"
+  // Nest names: "Kitchen", "Living Room", "Loft camera"
+  const displayName = (matchedNestDevice.value.displayName || '').toLowerCase()
+  let streamId = displayName.replace(/\s+camera$/i, '').replace(/\s+/g, '_')
+
+  // Try to find matching stream from go2rtc
+  try {
+    const camRes = await fetch('/api/cameras')
+    if (camRes.ok) {
+      const cameras = await camRes.json()
+      // Find best match
+      const match = cameras.find((c: any) =>
+        c.id === streamId ||
+        c.id === displayName.replace(/\s+/g, '_') ||
+        displayName.includes(c.id.replace(/_/g, ' ')) ||
+        c.id.replace(/_/g, ' ').includes(displayName.split(' ')[0])
+      )
+      if (match) streamId = match.id
+      console.log('[camera] Available streams:', cameras.map((c: any) => c.id), '→ matched:', streamId)
+    }
+  } catch { /* no cameras endpoint */ }
+  console.log('[camera] Starting stream:', streamId)
+
+  try {
+    // Use go2rtc WebRTC — same approach as coalson-house
+    peerConnection = new RTCPeerConnection({ iceServers: [] })
+    peerConnection.addTransceiver('video', { direction: 'recvonly' })
+    peerConnection.addTransceiver('audio', { direction: 'recvonly' })
+
+    peerConnection.ontrack = (event) => {
+      console.log('[camera] ontrack fired', event.track.kind, event.streams.length)
+      if (videoRef.value && event.streams[0]) {
+        videoRef.value.srcObject = event.streams[0]
+        cameraStreamActive.value = true
+        console.log('[camera] video srcObject set, stream active')
+      } else {
+        console.log('[camera] ontrack but no videoRef or streams')
+      }
+    }
+
+    peerConnection.oniceconnectionstatechange = () => {
+      console.log('[camera] ICE state:', peerConnection?.iceConnectionState)
+      if (peerConnection?.iceConnectionState === 'disconnected' || peerConnection?.iceConnectionState === 'failed') {
+        cameraStreamActive.value = false
+      }
+    }
+
+    const offer = await peerConnection.createOffer()
+    await peerConnection.setLocalDescription(offer)
+
+    // Send offer to go2rtc via our proxy
+    const res = await fetch(`/api/cameras/${streamId}/webrtc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'offer', sdp: offer.sdp }),
+    })
+
+    if (!res.ok) {
+      throw new Error(`go2rtc returned ${res.status}`)
+    }
+
+    const answer = await res.json()
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer))
+  } catch (e: any) {
+    cameraStreamURL.value = `Stream error: ${e.message || 'unknown'}`
+    peerConnection?.close()
+    peerConnection = null
+  }
+  cameraLoading.value = false
+}
+
+function stopCameraStream() {
+  if (peerConnection) {
+    peerConnection.close()
+    peerConnection = null
+  }
+  if (videoRef.value) {
+    videoRef.value.srcObject = null
+  }
+  cameraStreamActive.value = false
+  cameraStreamURL.value = ''
+}
 
 async function checkGoogleStatus() {
   try {
@@ -543,6 +750,7 @@ async function checkGoogleStatus() {
     if (res.ok) {
       const data = await res.json()
       googleConnected.value = data.connected
+      googleChecked.value = true
       if (data.connected) {
         const devRes = await fetch('/api/google/devices')
         if (devRes.ok) {
@@ -552,6 +760,12 @@ async function checkGoogleStatus() {
             displayName: d.traits?.['sdm.devices.traits.Info']?.customName ||
               d.parentRelations?.[0]?.displayName || d.type?.split('.').pop() || 'Nest Device',
             typeName: d.type?.split('.').pop()?.replace(/([A-Z])/g, ' $1').trim() || 'Unknown',
+            isCamera: d.type?.includes('CAMERA') || d.type?.includes('DOORBELL') || d.type?.includes('DISPLAY'),
+            isThermostat: d.type?.includes('THERMOSTAT'),
+            isDisplay: d.type?.includes('DISPLAY'),
+            temperature: d.traits?.['sdm.devices.traits.Temperature']?.ambientTemperatureCelsius?.toFixed(1) || '',
+            humidity: d.traits?.['sdm.devices.traits.Humidity']?.ambientHumidityPercent?.toFixed(0) || '',
+            mode: d.traits?.['sdm.devices.traits.ThermostatMode']?.mode || '',
           }))
         }
       }
@@ -566,7 +780,10 @@ if (typeof window !== 'undefined' && window.location.hash === '#google-connected
 
 const isConnected = computed(() => {
   if (!probe.value) return false
-  return probe.value.status === 'connected'
+  if (probe.value.status === 'connected') return true
+  // Google devices are connected if OAuth is active
+  if (isGoogleDevice.value && googleConnected.value) return true
+  return false
 })
 
 const brandKey = computed(() => {
@@ -610,14 +827,23 @@ onMounted(async () => {
     device.value = { ip: deviceIP, name: deviceIP }
   }
 
-  // Probe the device in real-time
-  await runProbe()
-  loading.value = false
+  // Check Google status first (fast) — don't wait for slow local probe
+  await checkGoogleStatus()
+  await nextTick()
 
-  // Check Google Nest connection status
-  if (isGoogleDevice.value) {
-    await checkGoogleStatus()
+  const dt = device.value?.device_type?.toLowerCase() || ''
+  const isNestCam = dt === 'nest_camera' || dt === 'nest_device'
+
+  // Auto-start camera stream immediately for Nest cameras — don't wait for probe
+  if (matchedNestDevice.value?.isCamera && isNestCam) {
+    startCameraStream()
   }
+
+  // Skip the slow local probe for Nest cameras (they don't respond locally)
+  if (!isNestCam) {
+    await runProbe()
+  }
+  loading.value = false
 })
 
 // JellyFish controls
@@ -731,6 +957,16 @@ watch(chatMessages, () => {
 .doc-link { display: inline-block; margin-top: 12px; font-size: 13px; color: var(--color-accent); text-decoration: none; }
 .doc-link:hover { text-decoration: underline; }
 .google-btn { display: inline-block; text-decoration: none; text-align: center; }
+.camera-stream { margin-top: 16px; background: var(--color-surface); border: 1px solid var(--color-surface-border); border-radius: var(--radius-lg); overflow: hidden; }
+.camera-video { width: 100%; background: #000; display: block; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.camera-video.hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; }
+.camera-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; aspect-ratio: 16/9; background: #000; gap: 12px; color: var(--color-text-secondary); font-size: 14px; }
+.stream-controls { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; }
+.stream-status { font-size: 12px; font-weight: 600; color: #ef4444; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; }
+.stream-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; animation: blink 1.5s ease-in-out infinite; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.stream-info { font-size: 13px; color: var(--color-text-secondary); margin: 0; padding: 16px; }
+.stream-url { display: block; font-size: 12px; color: var(--color-accent); word-break: break-all; background: rgba(0,0,0,0.3); padding: 8px 12px; margin: 0 16px 16px; border-radius: var(--radius-sm); }
 
 .loading-state { text-align: center; padding: 80px 0; color: var(--color-text-secondary); display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .loader { width: 32px; height: 32px; border: 3px solid var(--color-surface-border); border-top-color: var(--color-accent); border-radius: 50%; animation: spin 0.8s linear infinite; }

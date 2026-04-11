@@ -208,10 +208,16 @@ func UpsertDevice(db *sql.DB, ip, mac, hostname, name, manufacturer, model, devi
 		ON CONFLICT(ip) DO UPDATE SET
 			mac = CASE WHEN excluded.mac != '' THEN excluded.mac ELSE devices.mac END,
 			hostname = CASE WHEN excluded.hostname != '' THEN excluded.hostname ELSE devices.hostname END,
-			name = CASE WHEN excluded.name != '' THEN excluded.name ELSE devices.name END,
+			name = CASE
+				WHEN devices.name != '' AND devices.name NOT LIKE 'Device .%' AND devices.name NOT LIKE '% .%' THEN devices.name
+				WHEN excluded.name != '' THEN excluded.name
+				ELSE devices.name END,
 			manufacturer = CASE WHEN excluded.manufacturer != '' THEN excluded.manufacturer ELSE devices.manufacturer END,
 			model = CASE WHEN excluded.model != '' THEN excluded.model ELSE devices.model END,
-			device_type = CASE WHEN excluded.device_type != '' THEN excluded.device_type ELSE devices.device_type END,
+			device_type = CASE
+				WHEN devices.device_type != '' AND devices.device_type NOT IN ('', 'nest_device') THEN devices.device_type
+				WHEN excluded.device_type != '' THEN excluded.device_type
+				ELSE devices.device_type END,
 			category = CASE WHEN excluded.category != '' AND excluded.category != 'unknown' THEN excluded.category ELSE devices.category END,
 			protocols = CASE WHEN excluded.protocols != '[]' THEN excluded.protocols ELSE devices.protocols END,
 			services = CASE WHEN excluded.services != '[]' THEN excluded.services ELSE devices.services END,

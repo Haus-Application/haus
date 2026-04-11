@@ -352,6 +352,37 @@ func (c *Client) GetCameraLiveStreamURL(deviceID string) (streamURL string, toke
 	return result.Results.StreamURLs.RTSPURL, result.Results.StreamExtensionToken, nil
 }
 
+// GenerateWebRtcStream creates a WebRTC live stream for cameras on the Google Home app.
+// Returns the answer SDP, media session ID, and expiry time.
+func (c *Client) GenerateWebRtcStream(deviceID, offerSDP string) (answerSDP, mediaSessionID, expiresAt string, err error) {
+	resp, err := c.do("POST", c.enterprisesPrefix()+"/devices/"+deviceID+":executeCommand", executeCommandRequest{
+		Command: "sdm.devices.commands.CameraLiveStream.GenerateWebRtcStream",
+		Params: map[string]interface{}{
+			"offerSdp": offerSDP,
+		},
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	data, err := checkResponse(resp)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	var result struct {
+		Results struct {
+			AnswerSDP      string `json:"answerSdp"`
+			ExpiresAt      string `json:"expiresAt"`
+			MediaSessionID string `json:"mediaSessionId"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", "", "", fmt.Errorf("nest: unmarshal webrtc response: %w", err)
+	}
+
+	return result.Results.AnswerSDP, result.Results.MediaSessionID, result.Results.ExpiresAt, nil
+}
+
 // ExtendCameraStream extends an active RTSP stream before it expires.
 func (c *Client) ExtendCameraStream(deviceID, extensionToken string) (newToken string, err error) {
 	resp, err := c.do("POST", c.enterprisesPrefix()+"/devices/"+deviceID+":executeCommand", executeCommandRequest{
