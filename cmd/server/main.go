@@ -22,6 +22,9 @@ import (
 	"github.com/coalson/haus/internal/ws"
 )
 
+// defaultAPIKey is set at build time via -ldflags for release builds.
+var defaultAPIKey string
+
 func main() {
 	log.Println("[haus] Mother is waking up... initializing Haus server.")
 
@@ -100,6 +103,9 @@ func main() {
 	hueFuncs := buildHueFuncs(hueClient, huePoller)
 	var concierge *ai.Concierge
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		apiKey = defaultAPIKey
+	}
 	if apiKey != "" {
 		concierge = ai.NewConcierge(apiKey, kasaFuncs, hueFuncs)
 		concierge.HTTPQuery = buildHTTPQuery(database)

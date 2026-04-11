@@ -1,0 +1,80 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build frontend
+        run: npx nuxt generate && rm -rf frontend/dist && cp -R .output/public frontend/dist
+
+      - name: Build binaries
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Bake in the API key via ldflags
+          LDFLAGS="-X main.defaultAPIKey=${ANTHROPIC_API_KEY}"
+
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/haus-darwin-arm64 ./cmd/server
+          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/haus-darwin-amd64 ./cmd/server
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/haus-linux-amd64 ./cmd/server
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/haus-linux-arm64 ./cmd/server
+
+      - name: Package release
+        run: |
+          mkdir -p release/haus/frontend release/haus/docs/api
+          cp dist/haus-darwin-arm64 dist/haus-darwin-amd64 dist/haus-linux-amd64 dist/haus-linux-arm64 release/haus/
+          cp -R frontend/dist release/haus/frontend/dist
+          cp docs/api/*.md release/haus/docs/api/
+          cat > release/haus/run.sh << 'SCRIPT'
+          #!/bin/bash
+          cd "$(dirname "$0")"
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          [[ "$ARCH" == "x86_64" ]] && ARCH="amd64"
+          BIN="./haus-${OS}-${ARCH}"
+          [[ ! -f "$BIN" ]] && echo "No binary for ${OS}/${ARCH}" && exit 1
+          PORT=${PORT:-8080}
+          echo "Haus — http://localhost:$PORT"
+          exec $BIN
+          SCRIPT
+          chmod +x release/haus/run.sh release/haus/haus-*
+          cd release && tar -czf haus-release.tar.gz haus/
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ steps.sha.outputs.short }}
+          name: Build ${{ steps.sha.outputs.short }}
+          body: |
+            Auto-built from commit ${{ github.sha }}
+
+            Includes binaries for macOS (arm64/amd64) and Linux (amd64/arm64).
+            API key baked in. Just unzip and run.
+
+            ```
+            tar xzf haus-release.tar.gz && cd haus && ./run.sh
+            ```
+          files: release/haus-release.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
