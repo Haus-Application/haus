@@ -20,6 +20,7 @@ import (
 	"github.com/coalson/haus/internal/hue"
 	"github.com/coalson/haus/internal/kasa"
 	"github.com/coalson/haus/internal/ws"
+	"github.com/gorilla/websocket"
 )
 
 // defaultAPIKey is set at build time via -ldflags for release builds.
@@ -109,6 +110,8 @@ func main() {
 	if apiKey != "" {
 		concierge = ai.NewConcierge(apiKey, kasaFuncs, hueFuncs)
 		concierge.HTTPQuery = buildHTTPQuery(database)
+		concierge.CameraSnapshot = api.CaptureSnapshotBase64
+		concierge.JellyFishQuery = buildJellyFishQuery()
 		log.Println("[haus] AI concierge is ready. GOB says the magic is real this time.")
 	} else {
 		log.Println("[haus] ANTHROPIC_API_KEY not set -- AI concierge disabled. GOB can't perform without props.")
@@ -170,6 +173,7 @@ func main() {
 	mux.HandleFunc("GET /api/cameras", server.HandleCameraList)
 	mux.HandleFunc("POST /api/cameras/{id}/webrtc", server.HandleCameraWebRTC)
 	mux.HandleFunc("GET /api/cameras/{id}/stream", server.HandleCameraStream)
+	mux.HandleFunc("GET /api/cameras/{id}/snapshot", server.HandleCameraSnapshot)
 
 	mux.HandleFunc("POST /api/google/camera/{deviceID}/stream", server.HandleNestCameraStream)
 	mux.HandleFunc("POST /api/google/camera/{deviceID}/extend", server.HandleNestCameraExtend)
@@ -338,6 +342,32 @@ func enrichNestDeviceNames(database *sql.DB, server *api.Server) {
 
 	if updated > 0 {
 		log.Printf("[enrich] Updated %d Google device names from Nest SDM API", updated)
+	}
+}
+
+// buildJellyFishQuery creates a function that queries JellyFish controllers
+// via their WebSocket API.
+func buildJellyFishQuery() ai.JellyFishQueryFunc {
+	return func(ip string, command map[string]interface{}) (string, error) {
+		dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
+		conn, _, err := dialer.Dial(fmt.Sprintf("ws://%s:9000/", ip), nil)
+		if err != nil {
+			return "", fmt.Errorf("connect failed: %w", err)
+		}
+		defer conn.Close()
+
+		conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		if err := conn.WriteJSON(command); err != nil {
+			return "", fmt.Errorf("write failed: %w", err)
+		}
+
+		conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			return "", fmt.Errorf("read failed: %w", err)
+		}
+
+		return string(msg), nil
 	}
 }
 

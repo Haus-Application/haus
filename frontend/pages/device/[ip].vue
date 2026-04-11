@@ -832,7 +832,7 @@ onMounted(async () => {
   await nextTick()
 
   const dt = device.value?.device_type?.toLowerCase() || ''
-  const isNestCam = dt === 'nest_camera' || dt === 'nest_device'
+  const isNestCam = dt === 'nest_camera' || dt === 'nest_device' || dt === 'thread_border_router'
 
   // Auto-start camera stream immediately for Nest cameras — don't wait for probe
   if (matchedNestDevice.value?.isCamera && isNestCam) {

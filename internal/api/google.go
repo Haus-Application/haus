@@ -165,11 +165,23 @@ func (s *Server) HandleGoogleDisconnect(w http.ResponseWriter, r *http.Request) 
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// Cached Google devices response — avoids hitting SDM API on every page load.
+var cachedGoogleDevicesJSON []byte
+var cachedGoogleDevicesTime time.Time
+const googleDevicesCacheTTL = 60 * time.Second
+
 // HandleGoogleDevices lists all Nest devices from the Smart Device Management API.
-// Refreshes the access token if expired before making the request.
+// Caches the response for 60 seconds to avoid repeated slow API calls.
 //
 // GET /api/google/devices
 func (s *Server) HandleGoogleDevices(w http.ResponseWriter, r *http.Request) {
+	// Return cached response if fresh
+	if len(cachedGoogleDevicesJSON) > 0 && time.Since(cachedGoogleDevicesTime) < googleDevicesCacheTTL {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cachedGoogleDevicesJSON)
+		return
+	}
 	tokens, err := db.LoadGoogleTokens(s.DB)
 	if err != nil || tokens == nil {
 		s.writeError(w, http.StatusUnauthorized, "Google Nest not connected -- authorize first via /api/google/auth")
@@ -210,8 +222,10 @@ func (s *Server) HandleGoogleDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pass through the raw JSON response -- the frontend or nest package
-	// can parse the device structure.
+	// Cache and return
+	cachedGoogleDevicesJSON = body
+	cachedGoogleDevicesTime = time.Now()
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)

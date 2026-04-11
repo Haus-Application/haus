@@ -134,4 +134,16 @@ The controller also serves a web UI on **port 8080** for firmware updates. This 
 - **Discovery:** mDNS service `_jellyfishV2._tcp` + TCP check on port 9000
 - **Probe:** WebSocket connect to get zones, patterns, controller name
 - **Control:** `POST /api/devices/{ip}/jellyfish` with `{action, zones, pattern}`
+- **AI Chat:** The AI can query zone states and control patterns via WebSocket
 - **No polling:** Stateless — query on demand via WebSocket
+- **No auth:** No authentication required — direct local WebSocket connection
+
+## AI Chat Capabilities
+
+When chatting with a JellyFish device, the AI can:
+- Query current zone states (on/off, active pattern)
+- Turn zones on/off
+- Play specific patterns on zones
+- List available patterns and zones
+
+The AI uses a direct WebSocket connection to port 9000 for real-time queries.

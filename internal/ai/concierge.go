@@ -17,7 +17,9 @@ type Concierge struct {
 	client    anthropic.Client
 	kasaFuncs *KasaFuncs
 	hueFuncs  *HueFuncs
-	HTTPQuery DeviceHTTPQuery // for authenticated HTTP requests to devices
+	HTTPQuery      DeviceHTTPQuery      // for authenticated HTTP requests to devices
+	CameraSnapshot CameraSnapshotFunc   // captures JPEG from camera stream
+	JellyFishQuery JellyFishQueryFunc   // queries JellyFish WebSocket API
 }
 
 // ChatResponse holds the result of a concierge conversation turn.
@@ -226,7 +228,38 @@ func (c *Concierge) DeviceChat(ctx context.Context, device DeviceContext, messag
 		for _, block := range resp.Content {
 			if block.Type == "tool_use" {
 				log.Printf("[device-chat] executing tool: %s for %s", block.Name, device.Name)
-				result, execErr := ExecuteDeviceTool(block.Name, block.Input, device, c.kasaFuncs, c.hueFuncs, c.HTTPQuery)
+
+				if block.Name == "see_camera" && c.CameraSnapshot != nil {
+					// Special handling: capture snapshot and send as image to Claude
+					displayName := strings.ToLower(device.Name)
+					streamID := strings.ReplaceAll(strings.TrimSuffix(displayName, " camera"), " ", "_")
+
+					base64JPEG, snapErr := c.CameraSnapshot(streamID)
+					if snapErr != nil {
+						log.Printf("[device-chat] snapshot failed: %v", snapErr)
+						allToolCalls = append(allToolCalls, ToolCallResult{Tool: "see_camera", Result: "Failed to capture: " + snapErr.Error()})
+						toolResults = append(toolResults, anthropic.NewToolResultBlock(block.ID, "Snapshot capture failed: "+snapErr.Error(), true))
+					} else {
+						log.Printf("[device-chat] captured snapshot, sending to vision (%d bytes)", len(base64JPEG))
+						allToolCalls = append(allToolCalls, ToolCallResult{Tool: "see_camera", Result: "Snapshot captured and analyzed"})
+
+						// Send image as tool result with image content
+						imgBlock := anthropic.NewImageBlockBase64("image/jpeg", base64JPEG)
+						textBlock := anthropic.NewTextBlock("This is a live snapshot from the camera. Describe what you see in detail.")
+						toolResults = append(toolResults, anthropic.ContentBlockParamUnion{
+							OfToolResult: &anthropic.ToolResultBlockParam{
+								ToolUseID: block.ID,
+								Content: []anthropic.ToolResultBlockParamContentUnion{
+									{OfImage: imgBlock.OfImage},
+									{OfText: textBlock.OfText},
+								},
+							},
+						})
+					}
+					continue
+				}
+
+				result, execErr := ExecuteDeviceTool(block.Name, block.Input, device, c.kasaFuncs, c.hueFuncs, c.HTTPQuery, c.JellyFishQuery)
 				isErr := execErr != nil
 				if isErr {
 					result = execErr.Error()
@@ -312,6 +345,19 @@ Rules:
 		sb.WriteString("You are connected to this JellyFish outdoor lighting controller.\n")
 		sb.WriteString("The device has zones and patterns. Use query_device to see them.\n")
 		sb.WriteString("Patterns are played on zones. Example: 'Accent/All Lights Warm White 3000K' on Zone1.\n")
+
+	} else if device.DeviceType == "nest_camera" || device.DeviceType == "nest_thermostat" || device.DeviceType == "nest_device" {
+		sb.WriteString("## Connection: ACTIVE (Google Nest SDM API, authenticated)\n")
+		sb.WriteString("You are connected to this device through Google's Smart Device Management API. The user has already authenticated.\n")
+		if strings.Contains(strings.ToLower(device.DeviceType), "camera") {
+			sb.WriteString("This is a Nest Camera. You can:\n")
+			sb.WriteString("- Use the see_camera tool to capture a live snapshot and describe what you see\n")
+			sb.WriteString("- Report your connection status (you ARE connected and streaming)\n")
+			sb.WriteString("- When asked 'what do you see', ALWAYS use the see_camera tool first\n")
+			sb.WriteString("- Describe the scene in detail: people, objects, lighting, activity\n")
+		} else if strings.Contains(strings.ToLower(device.DeviceType), "thermostat") {
+			sb.WriteString("This is a Nest Thermostat. Use query_device to get temperature, humidity, and mode.\n")
+		}
 
 	} else if device.Manufacturer == "Yamaha" || device.DeviceType == "av_receiver" {
 		sb.WriteString("## Connection: ACTIVE (HTTP REST on port 80, no auth)\n")

@@ -29,6 +29,12 @@ type KasaFuncs struct {
 // DeviceHTTPQuery lets the AI make authenticated HTTP requests to any device.
 type DeviceHTTPQuery func(ip, path string) (string, error)
 
+// CameraSnapshotFunc captures a base64 JPEG from a camera stream.
+type CameraSnapshotFunc func(streamID string) (base64JPEG string, err error)
+
+// JellyFishQueryFunc queries a JellyFish controller's WebSocket API.
+type JellyFishQueryFunc func(ip string, command map[string]interface{}) (string, error)
+
 // DeviceContext identifies a single device for scoped chat.
 type DeviceContext struct {
 	IP           string   `json:"ip"`
@@ -786,6 +792,16 @@ func DeviceToolsForContext(device DeviceContext) []anthropic.ToolUnionParam {
 		}
 	}
 
+	if device.DeviceType == "nest_camera" || device.DeviceType == "nest_device" {
+		tools = append(tools, tool(anthropic.ToolParam{
+			Name:        "see_camera",
+			Description: anthropic.Opt("Look through the camera and describe what you see. Captures a live snapshot and analyzes it with vision AI."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]interface{}{},
+			},
+		}))
+	}
+
 	if device.DeviceType == "hue_bridge" {
 		for _, t := range deviceTools() {
 			if t.OfTool != nil && strings.HasPrefix(t.OfTool.Name, "hue_") {
@@ -798,10 +814,10 @@ func DeviceToolsForContext(device DeviceContext) []anthropic.ToolUnionParam {
 }
 
 // ExecuteDeviceTool dispatches a tool call for a device-scoped chat.
-func ExecuteDeviceTool(name string, input json.RawMessage, device DeviceContext, kasaFuncs *KasaFuncs, hueFuncs *HueFuncs, httpQuery DeviceHTTPQuery) (string, error) {
+func ExecuteDeviceTool(name string, input json.RawMessage, device DeviceContext, kasaFuncs *KasaFuncs, hueFuncs *HueFuncs, httpQuery DeviceHTTPQuery, jfQuery JellyFishQueryFunc) (string, error) {
 	switch name {
 	case "query_device":
-		return executeQueryDevice(device, kasaFuncs, hueFuncs, httpQuery)
+		return executeQueryDevice(device, kasaFuncs, hueFuncs, httpQuery, jfQuery)
 	case "query_api":
 		var params struct{ Path string `json:"path"` }
 		json.Unmarshal(input, &params)
@@ -851,7 +867,7 @@ func ExecuteDeviceTool(name string, input json.RawMessage, device DeviceContext,
 	}
 }
 
-func executeQueryDevice(device DeviceContext, kasaFuncs *KasaFuncs, hueFuncs *HueFuncs, httpQuery DeviceHTTPQuery) (string, error) {
+func executeQueryDevice(device DeviceContext, kasaFuncs *KasaFuncs, hueFuncs *HueFuncs, httpQuery DeviceHTTPQuery, jfQuery JellyFishQueryFunc) (string, error) {
 	hasProtocol := func(p string) bool {
 		for _, proto := range device.Protocols {
 			if proto == p { return true }
@@ -874,6 +890,47 @@ func executeQueryDevice(device DeviceContext, kasaFuncs *KasaFuncs, hueFuncs *Hu
 			result += fmt.Sprintf("\nFan Speed: %d/4", info.FanSpeed)
 		}
 		return result, nil
+	}
+
+	if device.DeviceType == "jellyfish" && jfQuery != nil {
+		// Query JellyFish zones and their current state
+		zonesResult, err := jfQuery(device.IP, map[string]interface{}{
+			"cmd": "toCtlrGet", "get": [][]string{{"zones"}},
+		})
+		if err != nil {
+			return fmt.Sprintf("Device: %s at %s\nType: JellyFish\nStatus: Error querying - %v", device.Name, device.IP, err), nil
+		}
+
+		stateResult, err := jfQuery(device.IP, map[string]interface{}{
+			"cmd": "toCtlrGet", "get": [][]string{{"runPattern", "Zone", "Zone1"}},
+		})
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Device: %s\nIP: %s\nType: JellyFish Lighting Controller\nStatus: Connected\n\n", device.Name, device.IP))
+		sb.WriteString("Zones:\n" + zonesResult + "\n")
+		if err == nil {
+			sb.WriteString("\nCurrent State:\n" + stateResult + "\n")
+		}
+		return sb.String(), nil
+	}
+
+	if device.DeviceType == "nest_camera" || device.DeviceType == "nest_thermostat" || device.DeviceType == "nest_device" {
+		// For Nest devices, report what we know from the DB + Google connection status
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Device: %s\n", device.Name))
+		sb.WriteString(fmt.Sprintf("IP: %s\n", device.IP))
+		sb.WriteString(fmt.Sprintf("Type: %s\n", device.DeviceType))
+		sb.WriteString("Connection: ACTIVE (Google Nest SDM API)\n")
+		sb.WriteString("Status: Online and streaming\n")
+		if strings.Contains(device.DeviceType, "camera") {
+			sb.WriteString("\nThis camera is live and streaming.\n")
+			sb.WriteString("Capabilities: Live WebRTC streaming, snapshot capture, vision analysis, motion detection.\n")
+			sb.WriteString("Use the see_camera tool to capture and analyze what the camera sees right now.\n")
+		}
+		if strings.Contains(device.DeviceType, "thermostat") {
+			sb.WriteString("\nUse query_api to get temperature, humidity, and thermostat mode from the SDM API.\n")
+		}
+		return sb.String(), nil
 	}
 
 	if device.DeviceType == "hue_bridge" && hueFuncs != nil && hueFuncs.ListLights != nil {
