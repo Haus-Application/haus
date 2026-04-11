@@ -236,6 +236,24 @@ Nest devices are discovered on the local network by their MAC addresses but cann
 - **Auto-enrichment:** Device names updated from SDM API on startup
 - **Performance:** Local probe skipped for `nest_camera` devices (cloud-only, no local ports)
 
+## AI Chat Capabilities
+
+When chatting with a Nest camera, the AI can:
+- **See through the camera** — captures a live snapshot via go2rtc and uses Claude's vision AI to describe the scene in detail (people, objects, lighting, activity)
+- **Report connection status** — confirms streaming is active
+- **Describe capabilities** — live streaming, motion detection, person detection
+
+When chatting with a Nest thermostat, the AI can:
+- **Query temperature and humidity** — real-time readings from the SDM API
+- **Report thermostat mode** — HEAT, COOL, HEATCOOL, OFF
+- **Set temperature and mode** — via SDM command execution
+
+When chatting with a Nest display (Hub Max), the AI can:
+- **See through the camera** — same vision capabilities as cameras
+- **Stream live video** — auto-starts WebRTC stream on page load
+
+The AI speaks as the device: "I can see your living room — there's a couch, coffee table, and the TV is on."
+
 ## Limitations
 
 - Nest cameras are cloud-only — no local streaming without go2rtc + Google API

@@ -117,6 +117,18 @@ PUT /clip/v2/resource/scene/{id}
 - **Control:** `PUT /api/hue/lights/{id}`, `/rooms/{id}`, `/scenes/{id}/activate`
 - **WebSocket:** Live state broadcast via `hue:state` event
 
+## AI Chat Capabilities
+
+When chatting with a Hue Bridge, the AI can:
+- **List all lights** with on/off state, brightness, room assignment
+- **Toggle individual lights** by name (fuzzy matching)
+- **Set brightness** on any light (0-100%)
+- **Change colors** using named colors (warm, cool, red, blue, green, purple, orange, pink)
+- **List and activate scenes** by name
+- **Control entire rooms** — turn all lights on/off, set room brightness
+
+The AI speaks as the bridge: "I have 12 lights across 4 rooms. Living room lights are on at 75%."
+
 ## Documentation
 
 - Official: https://developers.meethue.com/develop/hue-api-v2/

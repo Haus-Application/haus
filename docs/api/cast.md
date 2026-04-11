@@ -88,3 +88,12 @@ Google Nest Hub Max devices also function as Thread border routers, advertising 
 - **Info:** `GET /setup/eureka_info` for device name and model
 - **Control:** Not yet implemented (requires Cast SDK)
 - **Status:** Read-only — can identify but not control
+
+## AI Chat Capabilities
+
+When chatting with a Cast device, the AI can:
+- **Report device identity** — name, model from eureka_info
+- **Report network status** — on the network, responding on port 8008
+- Cast control (play/pause/volume) requires the Cast SDK and is not yet implemented
+
+For Nest Hub Max and Nest displays that are also Google Nest devices: if the user has connected their Google account via OAuth, the AI can access camera feeds and describe what the camera sees using vision AI (live snapshot analysis).

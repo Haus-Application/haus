@@ -90,3 +90,14 @@ Use the set_brightness command with the mapped value.
 - **Polling:** Every 10 seconds via `get_sysinfo`
 - **Control:** `POST /api/kasa/devices/{ip}/state`, `/brightness`, `/fan-speed`
 - **WebSocket:** Live state broadcast via `kasa:state` event
+
+## AI Chat Capabilities
+
+When chatting with a Kasa device, the AI can:
+- **Query real-time state** via XOR protocol (on/off, brightness, fan speed)
+- **Toggle power** on/off instantly
+- **Set brightness** 0-100% on dimmers
+- **Set fan speed** 1-4 on fans
+- **Optimistic UI** — controls update instantly, poller confirms within 10s
+
+The AI speaks as the device: "I'm currently off, brightness set to 89%."

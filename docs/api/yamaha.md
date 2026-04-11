@@ -128,3 +128,13 @@ GET /system/setNetworkStandby?standby=on
 - **Probe:** `GET /system/getDeviceInfo` + `GET /main/getStatus`
 - **Control:** Direct HTTP GET to receiver API endpoints
 - **No auth:** All endpoints are open on the local network
+
+## AI Chat Capabilities
+
+When chatting with a Yamaha receiver, the AI can:
+- **Query current state** — power, volume, input, mute status
+- **Get device info** — model name, firmware version, serial number
+- **Toggle power** on/off/standby
+- All via the MusicCast HTTP REST API on port 80
+
+The AI speaks as the device: "I'm in standby mode. Volume is at 45, input is HDMI 1."

@@ -51,3 +51,11 @@ The Brilliant protocol on port 5455 appears to be:
 - **Discovery:** mDNS `_brilliant._tcp` + TCP check on port 5455
 - **Control:** Not yet implemented
 - **Status:** Detected but not controllable
+
+## AI Chat Capabilities
+
+When chatting with a Brilliant switch, the AI can:
+- **Report discovery info** — IP, MAC, mDNS service, port 5455 status
+- **Explain the device** — what Brilliant panels are and their capabilities
+- **Suggest connection paths** — Brilliant app, HomeKit, SmartThings integration
+- Direct control is not yet available (proprietary protocol)

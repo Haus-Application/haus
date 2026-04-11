@@ -107,6 +107,18 @@ The PVS uses a self-signed certificate issued by "SunStrong Management LLC" with
 ## Haus Integration
 
 - **Discovery:** TLS cert CN=pvs.local, mDNS `_pvs6._tcp`, manufacturer=SunPower
-- **Auth:** `POST /api/devices/{ip}/auth` with password
+- **Auth:** `POST /api/devices/{ip}/auth` with password (stored in DB for reuse)
 - **Polling:** Fetch `/vars?match=livedata&fmt=obj` every 30 seconds
 - **Data:** Production, consumption, grid, battery metrics
+
+## AI Chat Capabilities
+
+When chatting with a SunPower PVS, the AI can:
+- **Query live solar data** — production, consumption, grid import/export
+- **Count panels** — lists all micro-inverters with serial numbers
+- **Per-panel data** — lifetime production, temperature, voltage per inverter
+- **Lifetime stats** — total kWh produced, grid energy, consumption
+- **Uses stored credentials** — authenticates automatically with saved password
+
+The AI uses `/vars?match=sys&fmt=obj` endpoint (not `/cgi-bin/` which returns 403).
+The AI speaks as the device: "I'm producing 3.5 kW right now with 14 panels."
