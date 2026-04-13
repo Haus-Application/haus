@@ -6,14 +6,14 @@ import (
 	"log"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Open opens a SQLite database at the given path with WAL mode and foreign keys enabled.
 // Mother always said a well-organized database is the foundation of a good home.
 func Open(path string) (*sql.DB, error) {
 	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_foreign_keys=on", path)
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
