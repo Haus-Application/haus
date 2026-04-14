@@ -217,19 +217,15 @@ func (s *Scanner) run(session *ScanSession, subnet string) {
 	portsFound := countTotalOpenPorts(session)
 	emitStage(session, "ports", "complete", fmt.Sprintf("Found %d open ports", portsFound), portsFound)
 
-	// Stage 4: Kasa probe
-	kasaBefore := countByProtocol(session, "kasa")
-	emitStage(session, "kasa", "running", "Probing Kasa devices...", 0)
+	// Stage 4: Protocol probes. Kasa + Cast run under one user-visible stage
+	// so the progress UI stays brand-agnostic. The per-device results still
+	// flow through normally; classification adds brand/integration info.
+	probeBefore := countByAnyProtocol(session, "kasa", "cast")
+	emitStage(session, "probe", "running", "Probing devices...", 0)
 	probeKasa(session)
-	kasaFound := countByProtocol(session, "kasa") - kasaBefore
-	emitStage(session, "kasa", "complete", fmt.Sprintf("Found %d Kasa devices", kasaFound), kasaFound)
-
-	// Stage 5: Cast probe
-	castBefore := countByProtocol(session, "cast")
-	emitStage(session, "cast", "running", "Probing Cast devices...", 0)
 	probeCast(session)
-	castFound := countByProtocol(session, "cast") - castBefore
-	emitStage(session, "cast", "complete", fmt.Sprintf("Found %d Cast devices", castFound), castFound)
+	probeFound := countByAnyProtocol(session, "kasa", "cast") - probeBefore
+	emitStage(session, "probe", "complete", fmt.Sprintf("Probed %d device(s)", probeFound), probeFound)
 
 	// Stage 6: mDNS scan
 	mdnsBefore := len(session.Devices)
@@ -293,6 +289,25 @@ func countByProtocol(session *ScanSession, proto string) int {
 	for _, d := range session.Devices {
 		for _, p := range d.Protocols {
 			if p == proto {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
+// countByAnyProtocol counts devices whose protocols list contains any of the
+// given values. Used for the brand-agnostic probe stage.
+func countByAnyProtocol(session *ScanSession, protos ...string) int {
+	set := make(map[string]bool, len(protos))
+	for _, p := range protos {
+		set[p] = true
+	}
+	count := 0
+	for _, d := range session.Devices {
+		for _, p := range d.Protocols {
+			if set[p] {
 				count++
 				break
 			}

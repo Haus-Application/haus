@@ -27,11 +27,13 @@ const STAGE_NAMES: Record<string, string> = {
   arp: 'Host Discovery',
   ipv6: 'IPv6 Discovery',
   oui: 'Manufacturer Lookup',
-  ports: 'Port Scan (nmap)',
-  kasa: 'Kasa Devices',
-  cast: 'Chromecast / Cast',
+  ports: 'Port Scan',
+  probe: 'Device Probes',
   mdns: 'mDNS Services',
   classify: 'Classification',
+  // Legacy keys kept so older server builds don't render unlabeled rows.
+  kasa: 'Device Probes',
+  cast: 'Device Probes',
 }
 
 export function useScan() {
