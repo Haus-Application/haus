@@ -1,6 +1,6 @@
 <template>
   <div class="dashboard">
-    <header class="dash-header">
+    <header class="dash-header" v-if="welcomeStep === 'done'">
       <div class="header-brand">
         <h1 class="title">Haus</h1>
         <p class="subtitle">Smart Home</p>
@@ -20,18 +20,50 @@
       </div>
     </header>
 
-    <!-- Full-screen scanning state -->
-    <div v-if="status === 'scanning'" class="scan-fullscreen">
+    <!-- Step 1: First-visit welcome (auto-advances to scan) -->
+    <div v-if="welcomeStep === 'welcome'" class="welcome-screen" role="status" aria-live="polite">
+      <img src="~/assets/fox.png" alt="Haus" class="fox-avatar welcome-bounce" />
+      <h1 class="welcome-title">Hi, I'm Haus</h1>
+      <p class="welcome-sub">Give me a second — I'll find everyone on your network.</p>
+      <div class="welcome-dots">
+        <span /><span /><span />
+      </div>
+    </div>
+
+    <!-- Step 2: Full-screen scanning state -->
+    <div v-else-if="status === 'scanning'" class="scan-fullscreen">
       <div class="scan-fox">
         <img src="~/assets/fox.png" alt="Haus scanning" class="fox-avatar scanning" />
       </div>
       <ScanProgress :stages="stages" />
     </div>
 
-    <!-- Normal content (hidden during scan) -->
+    <!-- Step 3: Results -->
     <template v-else>
       <div v-if="status === 'error'" class="error-banner">
         Could not connect to scan service. Is the server running?
+      </div>
+
+      <!-- Smart suggestions: integration opportunities we detected -->
+      <div v-if="suggestions.length > 0" class="suggestions" role="region" aria-label="Setup suggestions">
+        <div class="suggestions-head">
+          <span class="suggestions-title">
+            I see {{ suggestions.length }} {{ suggestions.length === 1 ? 'thing' : 'things' }} you can set up
+          </span>
+        </div>
+        <div class="suggestions-list">
+          <div v-for="s in suggestions" :key="s.id" class="suggestion-card" :class="`sug-${s.id}`">
+            <div class="sug-icon" aria-hidden="true">{{ s.icon }}</div>
+            <div class="sug-body">
+              <div class="sug-title">{{ s.title }}</div>
+              <div class="sug-sub">{{ s.sub }}</div>
+            </div>
+            <div class="sug-actions">
+              <button class="sug-btn primary" @click="s.action">{{ s.cta }}</button>
+              <button class="sug-btn ghost" aria-label="Dismiss" @click="dismissSuggestion(s.id)">✕</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Brand filter -->
@@ -43,8 +75,9 @@
       <main class="dash-content">
         <div v-if="totalDevices === 0" class="empty-state">
           <img src="~/assets/fox.png" alt="Haus" class="fox-avatar" />
-          <p class="empty-title">Hi, I'm Haus</p>
-          <p class="empty-sub">Scan your network and I'll find all your smart home devices</p>
+          <p class="empty-title">I couldn't find anyone yet</p>
+          <p class="empty-sub">Make sure your devices are on the same network, then scan again.</p>
+          <button class="btn-scan" @click="startScan">Scan Again</button>
         </div>
 
         <DeviceGrid
@@ -56,6 +89,9 @@
         />
       </main>
     </template>
+
+    <!-- Hue pairing dialog (shown on demand from suggestion card) -->
+    <HuePairDialog :show="showHueDialog" @close="onHuePairClose" />
   </div>
 </template>
 
@@ -63,7 +99,60 @@
 // No tabs, no drama, just the dashboard. Marry me.
 const { stages, status, startScan, devicesByCategory, totalDevices, devices } = useScan()
 
-// Brand filtering
+// -- First-visit welcome / auto-scan -----------------------------------------
+// On first visit (flag not set + no devices yet) we show a 2s welcome screen,
+// then auto-trigger a scan. After that first scan, we never auto-scan again —
+// returning users go straight to their grid.
+type WelcomeStep = 'pending' | 'welcome' | 'done'
+const welcomeStep = ref<WelcomeStep>('pending')
+const FIRST_SCAN_KEY = 'haus_first_scan_done'
+
+// -- Integration status ------------------------------------------------------
+const hueConnected = ref<boolean | null>(null)
+const googleConnected = ref<boolean | null>(null)
+const dismissed = ref<Set<string>>(new Set(JSON.parse(localStorage.getItem('haus_dismissed_suggestions') || '[]')))
+
+async function refreshIntegrationStatus() {
+  try {
+    const [hue, google] = await Promise.all([
+      fetch('/api/hue/status').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/google/status').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ])
+    hueConnected.value = !!hue?.connected
+    googleConnected.value = !!google?.connected
+  } catch {
+    // non-fatal
+  }
+}
+
+onMounted(async () => {
+  await refreshIntegrationStatus()
+
+  // Wait a tick so useScan's own onMounted loadDevices can settle.
+  await nextTick()
+  const alreadyRan = localStorage.getItem(FIRST_SCAN_KEY) === '1'
+  if (!alreadyRan && devices.value.length === 0) {
+    welcomeStep.value = 'welcome'
+    // Give the welcome copy a beat, then kick off the scan.
+    setTimeout(() => {
+      welcomeStep.value = 'done'
+      startScan()
+    }, 2200)
+  } else {
+    welcomeStep.value = 'done'
+  }
+})
+
+// When a scan finishes, mark the first-run flag and re-check integrations
+// (because the scan may have just discovered a Hue bridge or Nest devices).
+watch(status, (s) => {
+  if (s === 'complete') {
+    localStorage.setItem(FIRST_SCAN_KEY, '1')
+    refreshIntegrationStatus()
+  }
+})
+
+// -- Brand filtering ---------------------------------------------------------
 const activeBrand = ref<string | null>(null)
 
 const BRAND_MAP: Record<string, string> = {
@@ -96,6 +185,70 @@ const availableBrands = computed(() => {
     if (brand) brands.add(brand)
   }
   return [...brands].sort()
+})
+
+// -- Smart integration suggestions ------------------------------------------
+const hasHueBridge = computed(() =>
+  devices.value.some((d) => {
+    const mfr = (d.manufacturer || '').toLowerCase()
+    const type = (d.device_type || '').toLowerCase()
+    return type === 'hue_bridge' || mfr.includes('philips') || mfr.includes('signify')
+  })
+)
+const hasGoogleDevices = computed(() =>
+  devices.value.some((d) => {
+    const mfr = (d.manufacturer || '').toLowerCase()
+    return mfr.includes('google') || mfr.includes('nest')
+  })
+)
+
+const showHueDialog = ref(false)
+function openHuePair() { showHueDialog.value = true }
+function onHuePairClose() {
+  showHueDialog.value = false
+  refreshIntegrationStatus()
+}
+function startGoogleAuth() {
+  window.location.href = '/api/google/auth'
+}
+function dismissSuggestion(id: string) {
+  dismissed.value.add(id)
+  dismissed.value = new Set(dismissed.value)
+  localStorage.setItem('haus_dismissed_suggestions', JSON.stringify([...dismissed.value]))
+}
+
+type Suggestion = {
+  id: string
+  icon: string
+  title: string
+  sub: string
+  cta: string
+  action: () => void
+}
+
+const suggestions = computed<Suggestion[]>(() => {
+  const out: Suggestion[] = []
+  if (hasHueBridge.value && hueConnected.value === false && !dismissed.value.has('hue')) {
+    out.push({
+      id: 'hue',
+      icon: '💡',
+      title: 'Pair your Philips Hue Bridge',
+      sub: "I found a Hue bridge — let's link it so I can control your lights.",
+      cta: 'Pair now',
+      action: openHuePair,
+    })
+  }
+  if (hasGoogleDevices.value && googleConnected.value === false && !dismissed.value.has('google')) {
+    out.push({
+      id: 'google',
+      icon: '🔗',
+      title: 'Connect your Google account',
+      sub: 'I see Google Nest devices. Sign in to control thermostats and see cameras.',
+      cta: 'Sign in',
+      action: startGoogleAuth,
+    })
+  }
+  return out
 })
 
 const filteredDevicesByCategory = computed(() => {
@@ -321,5 +474,160 @@ async function handleKasaBrightness({ ip, brightness }: { ip: string; brightness
   font-size: 14px;
   color: var(--color-text-secondary);
   max-width: 300px;
+}
+
+/* -- First-visit welcome screen ---------------------------------------- */
+.welcome-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 40px 20px;
+  text-align: center;
+}
+.welcome-title {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  margin-top: 8px;
+}
+.welcome-sub {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+  max-width: 380px;
+}
+.welcome-bounce {
+  animation: fox-bounce 1.4s ease-in-out infinite;
+}
+@keyframes fox-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+.welcome-dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.welcome-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  opacity: 0.4;
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+.welcome-dots span:nth-child(2) { animation-delay: 0.2s; }
+.welcome-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dot-pulse {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* -- Smart suggestions ---------------------------------------------------- */
+.suggestions {
+  margin: 0 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.suggestions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 4px;
+}
+.suggestions-title {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.suggestion-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface-border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.suggestion-card:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+}
+.sug-icon {
+  font-size: 24px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.sug-body {
+  flex: 1;
+  min-width: 0;
+}
+.sug-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 2px;
+}
+.sug-sub {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+.sug-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.sug-btn {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+.sug-btn.primary {
+  background: var(--color-accent);
+  color: #fff;
+}
+.sug-btn.primary:hover {
+  background: var(--color-accent-hover);
+}
+.sug-btn.ghost {
+  background: transparent;
+  color: var(--color-text-tertiary);
+  padding: 6px 8px;
+}
+.sug-btn.ghost:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+@media (max-width: 600px) {
+  .suggestion-card {
+    flex-wrap: wrap;
+  }
+  .sug-body { flex-basis: calc(100% - 56px); }
+  .sug-actions { margin-left: auto; }
 }
 </style>
