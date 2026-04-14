@@ -30,9 +30,15 @@ jobs:
       - name: Build binaries
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_PROJECT_ID: ${{ secrets.GOOGLE_PROJECT_ID }}
         run: |
-          # Bake in the API key via ldflags
+          # Bake credentials in via ldflags so users don't need any env setup
           LDFLAGS="-X main.defaultAPIKey=${ANTHROPIC_API_KEY}"
+          LDFLAGS="$LDFLAGS -X main.defaultGoogleClientID=${GOOGLE_CLIENT_ID}"
+          LDFLAGS="$LDFLAGS -X main.defaultGoogleClientSecret=${GOOGLE_CLIENT_SECRET}"
+          LDFLAGS="$LDFLAGS -X main.defaultGoogleProjectID=${GOOGLE_PROJECT_ID}"
 
           GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/haus-darwin-arm64 ./cmd/server
           GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/haus-darwin-amd64 ./cmd/server

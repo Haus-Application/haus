@@ -24,8 +24,25 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// defaultAPIKey is set at build time via -ldflags for release builds.
-var defaultAPIKey string
+// These are baked in at release build time via -ldflags. Local dev falls
+// back to environment variables. Mother doesn't leave credentials lying
+// around in plaintext — George Sr. would never forgive us.
+var (
+	defaultAPIKey             string
+	defaultGoogleClientID     string
+	defaultGoogleClientSecret string
+	defaultGoogleProjectID    string
+)
+
+// firstNonEmpty returns the first non-empty string in vals, or "".
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 func main() {
 	log.Println("[haus] Mother is waking up... initializing Haus server.")
@@ -131,9 +148,10 @@ func main() {
 		ValidationDir: resolveRuntimePath("validation"),
 
 		// Google Nest SDM credentials -- George Sr. keeps these locked up tight.
-		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
-		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		GoogleProjectID:    os.Getenv("GOOGLE_PROJECT_ID"),
+		// Env vars win (local dev), ldflags defaults are baked into release builds.
+		GoogleClientID:     firstNonEmpty(os.Getenv("GOOGLE_CLIENT_ID"), defaultGoogleClientID),
+		GoogleClientSecret: firstNonEmpty(os.Getenv("GOOGLE_CLIENT_SECRET"), defaultGoogleClientSecret),
+		GoogleProjectID:    firstNonEmpty(os.Getenv("GOOGLE_PROJECT_ID"), defaultGoogleProjectID),
 	}
 
 	mux := http.NewServeMux()

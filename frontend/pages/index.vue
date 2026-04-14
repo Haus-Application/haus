@@ -110,6 +110,7 @@ const FIRST_SCAN_KEY = 'haus_first_scan_done'
 // -- Integration status ------------------------------------------------------
 const hueConnected = ref<boolean | null>(null)
 const googleConnected = ref<boolean | null>(null)
+const googleConfigured = ref<boolean | null>(null)
 const dismissed = ref<Set<string>>(new Set(JSON.parse(localStorage.getItem('haus_dismissed_suggestions') || '[]')))
 
 async function refreshIntegrationStatus() {
@@ -120,6 +121,7 @@ async function refreshIntegrationStatus() {
     ])
     hueConnected.value = !!hue?.connected
     googleConnected.value = !!google?.connected
+    googleConfigured.value = !!google?.configured
   } catch {
     // non-fatal
   }
@@ -238,7 +240,15 @@ const suggestions = computed<Suggestion[]>(() => {
       action: openHuePair,
     })
   }
-  if (hasGoogleDevices.value && googleConnected.value === false && !dismissed.value.has('google')) {
+  // Only offer Google sign-in if the server is actually configured for it.
+  // Release binaries typically ship without Google client ID/secret, so the
+  // CTA would dead-end in an error page.
+  if (
+    hasGoogleDevices.value &&
+    googleConfigured.value === true &&
+    googleConnected.value === false &&
+    !dismissed.value.has('google')
+  ) {
     out.push({
       id: 'google',
       icon: '🔗',

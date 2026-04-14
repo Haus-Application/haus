@@ -129,14 +129,19 @@ func (s *Server) HandleGoogleAuthCallback(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/#google-connected", http.StatusTemporaryRedirect)
 }
 
-// HandleGoogleStatus returns whether Google Nest is connected (tokens exist).
+// HandleGoogleStatus returns whether Google Nest is connected (tokens exist)
+// and whether the server is configured to do Google OAuth at all (has the
+// client ID + project ID baked in or set via env).
 //
 // GET /api/google/status
 func (s *Server) HandleGoogleStatus(w http.ResponseWriter, r *http.Request) {
+	configured := s.GoogleClientID != "" && s.GoogleProjectID != ""
+
 	tokens, err := db.LoadGoogleTokens(s.DB)
 	if err != nil || tokens == nil {
 		s.writeJSON(w, http.StatusOK, map[string]interface{}{
-			"connected": false,
+			"connected":  false,
+			"configured": configured,
 		})
 		return
 	}
@@ -146,6 +151,7 @@ func (s *Server) HandleGoogleStatus(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"connected":     true,
+		"configured":    configured,
 		"token_expired": expired,
 		"has_refresh":   tokens.RefreshToken != "",
 	})
