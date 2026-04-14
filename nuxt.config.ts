@@ -6,7 +6,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/global.css'],
   nitro: {
     devProxy: {
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      '/api': { target: 'http://localhost:8080', changeOrigin: true },
     },
   },
   app: {

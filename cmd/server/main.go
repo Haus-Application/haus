@@ -32,7 +32,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8000"
+		port = "8080"
 	}
 
 	dbPath := os.Getenv("DB_PATH")
