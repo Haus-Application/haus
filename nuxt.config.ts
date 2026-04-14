@@ -10,10 +10,24 @@ export default defineNuxtConfig({
   vite: {
     server: {
       proxy: {
+        // Vite's HTTP proxy forwards REST + SSE to the Go backend. WebSocket
+        // (/api/ws) is NOT proxied here — the Vite/Nuxt dev server doesn't
+        // reliably pass WS upgrades through. useWebSocket.ts connects
+        // directly to :8080 in dev instead.
         '/api': {
           target: 'http://localhost:8080',
           changeOrigin: true,
-          ws: true, // WebSocket upgrade for /api/ws
+          // Long-lived SSE streams (/api/scan/stream) close client-side when
+          // the browser disconnects, which bubbles up as ECONNRESET in
+          // http-proxy. Without a handler, Vite escalates it to an
+          // unhandledRejection and Nuxt restarts mid-scan. Swallow it.
+          configure: (proxy: any) => {
+            proxy.on('error', (err: any) => {
+              if (err?.code !== 'ECONNRESET') {
+                console.warn('[vite proxy]', err?.message ?? err)
+              }
+            })
+          },
         },
       },
     },

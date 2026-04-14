@@ -28,8 +28,14 @@ export function useWebSocket() {
 
     intentionalClose = false
 
+    // In production the Go binary serves both the UI and the WS on the same
+    // origin. In Nuxt dev the UI is on :3000 and the Vite proxy does not
+    // reliably handle the /api/ws upgrade — go straight to the Go server on
+    // :8080. The WS hub's Upgrader has CheckOrigin:true so cross-origin is OK.
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
+    const host = import.meta.env?.DEV
+      ? `${window.location.hostname}:8080`
+      : window.location.host
     ws = new WebSocket(`${protocol}//${host}/api/ws`)
 
     ws.onopen = () => {
