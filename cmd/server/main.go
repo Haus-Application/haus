@@ -58,44 +58,32 @@ func main() {
 	log.Println("[haus] WebSocket hub is running. George Michael did good work.")
 
 	// -----------------------------------------------------------------------
-	// 2. Kasa device discovery and poller
+	// 2. Warm-resume pollers from persisted state. Zero network I/O at boot —
+	//    discovery happens when the user clicks Scan (POST /api/scan). Any
+	//    previously-discovered devices still in the DB keep their pollers alive
+	//    across restarts. Mother prefers we knock first.
 	// -----------------------------------------------------------------------
-	var kasaPoller *kasa.Poller
-	var kasaDevices []kasa.Device
+	var (
+		kasaPoller *kasa.Poller
+		hueClient  *hue.Client
+		huePoller  *hue.Poller
+		started    []string
+	)
 
-	subnet := scanner.Subnet()
-	if subnet != "" {
-		log.Printf("[haus] Scanning subnet %s for Kasa devices... I memorized the XOR protocol for this.", subnet)
-		kasaDevices, err = kasa.DiscoverDevices(subnet, 8*time.Second)
-		if err != nil {
-			log.Printf("[haus] Kasa discovery error: %v -- they're hiding. I'll try not to panic.", err)
-		} else if len(kasaDevices) > 0 {
-			var ips []string
-			for _, d := range kasaDevices {
-				ips = append(ips, d.IP)
-				log.Printf("[haus]   Found Kasa device: %s (%s) at %s", d.Alias, d.DeviceType, d.IP)
-			}
-			kasaPoller = kasa.NewPoller(ips, &broadcasterAdapter{hub: hub})
-			kasaPoller.Start()
-		}
-	} else {
-		log.Println("[haus] No subnet detected -- skipping Kasa discovery. Mother's network is being difficult.")
+	if ips, err := db.LoadKasaIPs(database); err != nil {
+		log.Printf("[haus] Could not load Kasa devices from DB: %v", err)
+	} else if len(ips) > 0 {
+		kasaPoller = kasa.NewPoller(ips, &broadcasterAdapter{hub: hub})
+		kasaPoller.Start()
+		started = append(started, fmt.Sprintf("Kasa: polling %d known device(s)", len(ips)))
 	}
-
-	// -----------------------------------------------------------------------
-	// 3. Hue bridge -- load saved config from database
-	// -----------------------------------------------------------------------
-	var hueClient *hue.Client
-	var huePoller *hue.Poller
 
 	hueConfig, err := db.LoadHueConfig(database)
 	if err == nil && hueConfig != nil {
 		hueClient = hue.NewClient(hueConfig.BridgeIP, hueConfig.Username)
 		huePoller = hue.NewPoller(hueClient, &broadcasterAdapter{hub: hub})
 		huePoller.Start()
-		log.Printf("[haus] Hue: connected to bridge at %s. Mother's lights are under control.", hueConfig.BridgeIP)
-	} else {
-		log.Println("[haus] Hue: no bridge configured (pair via POST /api/hue/pair). Mother hasn't introduced us yet.")
+		started = append(started, fmt.Sprintf("Hue: connected to bridge at %s", hueConfig.BridgeIP))
 	}
 
 	// -----------------------------------------------------------------------
@@ -234,13 +222,14 @@ func main() {
 	go enrichNestDeviceNames(database, server)
 
 	// -----------------------------------------------------------------------
-	// Startup summary
+	// Startup summary -- only mention integrations that actually started.
 	// -----------------------------------------------------------------------
-	log.Printf("[haus] Kasa: %d devices discovered", len(kasaDevices))
-	if hueConfig != nil {
-		log.Printf("[haus] Hue: connected to bridge at %s", hueConfig.BridgeIP)
+	if len(started) == 0 {
+		log.Println("[haus] No devices tracked yet. Click Scan in the UI when you're ready.")
 	} else {
-		log.Printf("[haus] Hue: no bridge configured (pair via POST /api/hue/pair)")
+		for _, line := range started {
+			log.Printf("[haus] %s", line)
+		}
 	}
 	log.Printf("[haus] Mother's house is coming alive! Listening on :%s", port)
 

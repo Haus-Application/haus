@@ -125,6 +125,26 @@ func LoadHueConfig(db *sql.DB) (*HueConfig, error) {
 	return &cfg, nil
 }
 
+// LoadKasaIPs returns persisted device IPs whose protocols list includes
+// "kasa". Used by the server at boot to warm-resume the Kasa poller without
+// re-scanning the network. Returns an empty slice (no error) when none exist.
+// Buster insists on keeping a list — "Mother likes to know who's in the house."
+func LoadKasaIPs(db *sql.DB) ([]string, error) {
+	rows, err := db.Query(`SELECT ip FROM devices WHERE protocols LIKE '%"kasa"%' ORDER BY ip`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ips []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err == nil && ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	return ips, nil
+}
+
 // SaveDeviceCredential stores auth credentials for a device.
 func SaveDeviceCredential(db *sql.DB, ip, integration, username, password, session string) error {
 	_, err := db.Exec(`
