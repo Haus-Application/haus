@@ -904,6 +904,7 @@ async function sendChat(text: string) {
           manufacturer: device.value.manufacturer || '', model: device.value.model || '',
           device_type: device.value.device_type || '', category: device.value.category || '',
           protocols: device.value.protocols || [],
+          capabilities: probe.value?.capabilities || [],
           api_docs: probe.value?.api_docs || '',
         },
         message: msg, history: chatHistory.value,

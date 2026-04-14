@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -123,6 +124,31 @@ func LoadHueConfig(db *sql.DB) (*HueConfig, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// EnrichGoogleDeviceType force-updates a device's type, name, and capabilities.
+// Used by the Nest enrichment path to correct scanner misclassifications once
+// the SDM API has told us what a device really is (e.g. Thread Border Router
+// → Nest Camera). Unlike UpsertDevice, this does not preserve a stale
+// existing device_type — the caller is expected to only hit this path when
+// the update is authoritative.
+//
+// Capabilities land in metadata.capabilities as a JSON array so the chat
+// system prompt and tool gating can read them without a schema change.
+func EnrichGoogleDeviceType(db *sql.DB, ip, deviceType, name string, caps []string) error {
+	capsJSON, err := json.Marshal(caps)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`
+		UPDATE devices
+		SET device_type = ?,
+		    name = ?,
+		    metadata = json_set(COALESCE(NULLIF(metadata,''), '{}'), '$.capabilities', json(?)),
+		    last_seen = CURRENT_TIMESTAMP
+		WHERE ip = ?
+	`, deviceType, name, string(capsJSON), ip)
+	return err
 }
 
 // LoadKasaIPs returns persisted device IPs whose protocols list includes

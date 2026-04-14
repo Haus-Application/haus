@@ -126,6 +126,11 @@ func (s *Server) HandleGoogleAuthCallback(w http.ResponseWriter, r *http.Request
 	}
 
 	log.Printf("[google] OAuth tokens stored. The Nest is under our control now.")
+
+	// Fire-and-forget Nest enrichment: update device_type + capabilities on
+	// any Google devices in the DB so they pick up camera chat tools, etc.
+	go s.EnrichNestDevices()
+
 	http.Redirect(w, r, "/#google-connected", http.StatusTemporaryRedirect)
 }
 

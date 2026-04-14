@@ -207,6 +207,30 @@ func (s *Server) HandleProbeDevice(w http.ResponseWriter, r *http.Request) {
 		s.probeGeneric(result, ip, stored)
 	}
 
+	// Merge enrichment-provided capabilities (from metadata.capabilities,
+	// written by api.EnrichGoogleDeviceType after Google OAuth) so tools like
+	// see_camera light up for devices the scanner originally misclassified.
+	if stored != nil && stored.Metadata != "" {
+		var md map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(stored.Metadata), &md); err == nil {
+			if rawCaps, ok := md["capabilities"]; ok {
+				var extra []string
+				if json.Unmarshal(rawCaps, &extra) == nil {
+					have := make(map[string]bool, len(result.Capabilities))
+					for _, c := range result.Capabilities {
+						have[c] = true
+					}
+					for _, c := range extra {
+						if !have[c] {
+							result.Capabilities = append(result.Capabilities, c)
+							have[c] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Load API documentation markdown if available (KB-preferred, falls back to docs/api/)
 	storedModel := ""
 	if stored != nil {

@@ -44,7 +44,23 @@ type DeviceContext struct {
 	DeviceType   string   `json:"device_type"`
 	Category     string   `json:"category"`
 	Protocols    []string `json:"protocols"`
-	APIDocs      string   `json:"api_docs,omitempty"` // markdown API documentation
+	Capabilities []string `json:"capabilities,omitempty"` // from probe result
+	APIDocs      string   `json:"api_docs,omitempty"`     // markdown API documentation
+}
+
+// hasCapability reports whether any of the device's capabilities match one of
+// the given names. Used by tool gating when the right tool isn't keyed on
+// device_type alone (e.g. a Nest Hub display can have a camera even though
+// its type might be classified as something else).
+func (d DeviceContext) hasCapability(names ...string) bool {
+	for _, c := range d.Capabilities {
+		for _, n := range names {
+			if c == n {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // HueFuncs holds closures for Philips Hue smart light operations.
@@ -792,7 +808,10 @@ func DeviceToolsForContext(device DeviceContext) []anthropic.ToolUnionParam {
 		}
 	}
 
-	if device.DeviceType == "nest_camera" || device.DeviceType == "nest_device" {
+	isNestCam := device.DeviceType == "nest_camera" || device.DeviceType == "nest_device"
+	hasGoogleCam := strings.EqualFold(device.Manufacturer, "Google") &&
+		device.hasCapability("camera_snapshot", "camera_stream")
+	if isNestCam || hasGoogleCam {
 		tools = append(tools, tool(anthropic.ToolParam{
 			Name:        "see_camera",
 			Description: anthropic.Opt("Look through the camera and describe what you see. Captures a live snapshot and analyzes it with vision AI."),
@@ -914,7 +933,8 @@ func executeQueryDevice(device DeviceContext, kasaFuncs *KasaFuncs, hueFuncs *Hu
 		return sb.String(), nil
 	}
 
-	if device.DeviceType == "nest_camera" || device.DeviceType == "nest_thermostat" || device.DeviceType == "nest_device" {
+	if device.DeviceType == "nest_camera" || device.DeviceType == "nest_thermostat" || device.DeviceType == "nest_device" ||
+		(strings.EqualFold(device.Manufacturer, "Google") && device.hasCapability("camera_snapshot", "camera_stream", "thermostat")) {
 		// For Nest devices, report what we know from the DB + Google connection status
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("Device: %s\n", device.Name))

@@ -237,7 +237,7 @@ func main() {
 	// -----------------------------------------------------------------------
 	// 6. Enrich Google/Nest device names from SDM API + go2rtc
 	// -----------------------------------------------------------------------
-	go enrichNestDeviceNames(database, server)
+	go startNestEnrichmentLoop(server)
 
 	// -----------------------------------------------------------------------
 	// Startup summary -- only mention integrations that actually started.
@@ -298,82 +298,12 @@ func (b *broadcasterAdapter) BroadcastGlobal(event interface{}) {
 // XOR protocol spec. Twice.
 // buildHTTPQuery creates a closure that makes authenticated HTTPS requests
 // to devices using stored credentials from the DB.
-// enrichNestDeviceNames queries go2rtc for camera streams and the Google SDM
-// API for device names, then updates DB entries so Google devices show proper
-// names like "Living Room Camera" instead of "Google .89".
-func enrichNestDeviceNames(database *sql.DB, server *api.Server) {
-	// Give go2rtc and Google API a moment to be ready
+// startNestEnrichmentLoop kicks off the initial Nest enrichment pass a few
+// seconds after boot. The real work lives in api.Server.EnrichNestDevices so
+// the same logic fires after OAuth callback too.
+func startNestEnrichmentLoop(server *api.Server) {
 	time.Sleep(3 * time.Second)
-
-	// Get Google Nest devices from SDM API
-	client, err := server.GetGoogleClient()
-	if err != nil {
-		log.Printf("[enrich] Google not connected, skipping camera enrichment: %v", err)
-		return
-	}
-
-	devices, err := client.ListDevices()
-	if err != nil {
-		log.Printf("[enrich] Failed to list Nest devices: %v", err)
-		return
-	}
-
-	// Get all devices from DB that are Google/Nest (manufacturer = "Google")
-	allDevices, err := db.LoadAllDevices(database)
-	if err != nil {
-		return
-	}
-
-	// Match Nest SDM devices to DB devices by name matching or just update
-	// all unnamed Google devices with the Nest names
-	googleDevices := []db.DeviceRow{}
-	for _, d := range allDevices {
-		if d.Manufacturer == "Google" && (d.Name == "" || strings.HasPrefix(d.Name, "Google .") || strings.HasPrefix(d.Name, "Device .")) {
-			googleDevices = append(googleDevices, d)
-		}
-	}
-
-	// Build list of Nest cameras/thermostats with their names
-	nestNames := []struct{ Name, Type string }{}
-	for _, dev := range devices {
-		displayName := ""
-		if len(dev.ParentRelations) > 0 {
-			displayName = dev.ParentRelations[0].DisplayName
-		}
-		deviceType := strings.Split(dev.Type, ".")[len(strings.Split(dev.Type, "."))-1]
-		if displayName != "" {
-			nestNames = append(nestNames, struct{ Name, Type string }{displayName, deviceType})
-		}
-	}
-
-	// Assign Nest names to unnamed Google devices round-robin
-	// (best effort — we can't match IPs to SDM devices)
-	updated := 0
-	for i, gd := range googleDevices {
-		if i < len(nestNames) {
-			typeSuffix := strings.ToLower(nestNames[i].Type)
-			if typeSuffix == "thermostat" { typeSuffix = "Thermostat" }
-			if typeSuffix == "camera" { typeSuffix = "Camera" }
-			if typeSuffix == "display" { typeSuffix = "Display" }
-			if typeSuffix == "doorbell" { typeSuffix = "Doorbell" }
-			newName := fmt.Sprintf("%s %s", nestNames[i].Name, typeSuffix)
-			category := "smart_home"
-			deviceType := "nest_" + strings.ToLower(nestNames[i].Type)
-			if nestNames[i].Type == "CAMERA" || nestNames[i].Type == "DISPLAY" {
-				deviceType = "nest_camera"
-			}
-
-			db.UpsertDevice(database, gd.IP, gd.MAC, gd.Hostname, newName,
-				gd.Manufacturer, gd.Model, deviceType, category,
-				gd.Protocols, gd.Services, gd.OpenPorts, gd.Metadata)
-			log.Printf("[enrich] %s → %s (%s)", gd.IP, newName, nestNames[i].Type)
-			updated++
-		}
-	}
-
-	if updated > 0 {
-		log.Printf("[enrich] Updated %d Google device names from Nest SDM API", updated)
-	}
+	server.EnrichNestDevices()
 }
 
 // buildJellyFishQuery creates a function that queries JellyFish controllers
