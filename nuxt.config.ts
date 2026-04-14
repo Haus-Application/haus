@@ -4,6 +4,20 @@ export default defineNuxtConfig({
   ssr: false,
   compatibilityDate: '2025-01-01',
   css: ['~/assets/css/global.css'],
+  // Vite handles the dev server when ssr: false, so its proxy config is what
+  // actually forwards /api and /api/ws to the Go backend on :8080. The
+  // nitro.devProxy block is kept for production-style previews.
+  vite: {
+    server: {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8080',
+          changeOrigin: true,
+          ws: true, // WebSocket upgrade for /api/ws
+        },
+      },
+    },
+  },
   nitro: {
     devProxy: {
       '/api': { target: 'http://localhost:8080', changeOrigin: true },
