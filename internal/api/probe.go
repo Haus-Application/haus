@@ -17,12 +17,17 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// DocsBaseDir is the directory where API docs live (e.g. "docs/api").
+// main.go sets this at startup to an absolute path so the binary works
+// regardless of CWD. Mother always said you should know where your docs are.
+var DocsBaseDir = "docs/api"
+
 // loadAPIDocs reads the markdown documentation for a device integration type.
 func loadAPIDocs(integration string) string {
 	if integration == "" || integration == "unknown" || integration == "generic" {
 		return ""
 	}
-	data, err := os.ReadFile(fmt.Sprintf("docs/api/%s.md", integration))
+	data, err := os.ReadFile(fmt.Sprintf("%s/%s.md", DocsBaseDir, integration))
 	if err != nil {
 		return ""
 	}

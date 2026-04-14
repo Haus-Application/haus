@@ -186,8 +186,12 @@ func main() {
 	// WebSocket
 	mux.HandleFunc("/api/ws", hub.HandleWebSocket)
 
+	// Resolve runtime asset paths (frontend + docs) relative to either CWD (dev)
+	// or the binary's own directory (release). Mother always said: know where you live.
+	api.DocsBaseDir = resolveRuntimePath("docs/api")
+
 	// Serve frontend (SPA) if dist directory exists
-	frontendDir := "frontend/dist"
+	frontendDir := resolveRuntimePath("frontend/dist")
 	if info, err := os.Stat(frontendDir); err == nil && info.IsDir() {
 		log.Printf("[haus] Serving frontend from %s", frontendDir)
 		mux.Handle("/", spaHandler(frontendDir))
@@ -553,6 +557,26 @@ func buildHueFuncs(client *hue.Client, poller *hue.Poller) *ai.HueFuncs {
 			return client.ActivateScene(sceneID)
 		},
 	}
+}
+
+// resolveRuntimePath locates a runtime asset directory. Tries CWD first (dev
+// mode — running from source tree), then falls back to a path relative to the
+// binary's own directory (release mode — ./run.sh or binary invoked from
+// elsewhere). Returns the input unchanged if neither location works; callers
+// that use os.Stat will then surface the "not found" branch.
+func resolveRuntimePath(relative string) string {
+	if info, err := os.Stat(relative); err == nil && info.IsDir() {
+		abs, err := filepath.Abs(relative)
+		if err == nil {
+			return abs
+		}
+		return relative
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return relative
+	}
+	return filepath.Join(filepath.Dir(exe), relative)
 }
 
 // spaHandler serves static files from the given directory, falling back

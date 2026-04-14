@@ -41,9 +41,10 @@ jobs:
 
       - name: Package release
         run: |
-          mkdir -p release/haus/frontend release/haus/docs/devices
+          mkdir -p release/haus/frontend release/haus/docs/api release/haus/docs/devices
           cp dist/haus-darwin-arm64 dist/haus-darwin-amd64 dist/haus-linux-amd64 dist/haus-linux-arm64 release/haus/
           cp -R frontend/dist release/haus/frontend/dist
+          cp docs/api/*.md release/haus/docs/api/
           cp docs/devices/*.md release/haus/docs/devices/
           cat > release/haus/run.sh << 'SCRIPT'
           #!/bin/bash
