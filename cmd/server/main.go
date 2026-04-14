@@ -19,6 +19,7 @@ import (
 	"github.com/coalson/haus/internal/discovery"
 	"github.com/coalson/haus/internal/hue"
 	"github.com/coalson/haus/internal/kasa"
+	"github.com/coalson/haus/internal/kb"
 	"github.com/coalson/haus/internal/ws"
 	"github.com/gorilla/websocket"
 )
@@ -120,6 +121,15 @@ func main() {
 	// -----------------------------------------------------------------------
 	// 5. API server and routes
 	// -----------------------------------------------------------------------
+	// Load the device knowledge base (100 markdown files with YAML frontmatter).
+	// Used by the probe system to inject rich API docs and by the validation
+	// dashboard. Non-fatal if missing — we'll just fall back to docs/api/.
+	kbDir := resolveRuntimePath("docs/devices")
+	catalog, err := kb.Load(kbDir)
+	if err != nil {
+		log.Printf("[haus] WARNING: failed to load device knowledge base from %s: %v", kbDir, err)
+	}
+
 	server := &api.Server{
 		DB:         database,
 		Scanner:    scanner,
@@ -127,6 +137,10 @@ func main() {
 		HueClient:  hueClient,
 		HuePoller:  huePoller,
 		Concierge:  concierge,
+		KB:         catalog,
+		Hub:        hub,
+		APIKey:     apiKey,
+		ValidationDir: resolveRuntimePath("validation"),
 
 		// Google Nest SDM credentials -- George Sr. keeps these locked up tight.
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
@@ -182,6 +196,12 @@ func main() {
 	// Chat route
 	mux.HandleFunc("POST /api/chat", server.HandleChat)
 	mux.HandleFunc("POST /api/chat/device", server.HandleDeviceChat)
+
+	// Validation routes -- Buster & GOB grading the 100-device knowledge base.
+	mux.HandleFunc("GET /api/validation/summary", server.HandleValidationSummary)
+	mux.HandleFunc("GET /api/validation/devices", server.HandleValidationDeviceList)
+	mux.HandleFunc("GET /api/validation/devices/{slug}", server.HandleValidationDeviceReport)
+	mux.HandleFunc("POST /api/validation/run", server.HandleValidationRun)
 
 	// WebSocket
 	mux.HandleFunc("/api/ws", hub.HandleWebSocket)

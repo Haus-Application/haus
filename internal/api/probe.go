@@ -17,13 +17,22 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// DocsBaseDir is the directory where API docs live (e.g. "docs/api").
+// DocsBaseDir is the legacy directory where API docs live (e.g. "docs/api").
 // main.go sets this at startup to an absolute path so the binary works
-// regardless of CWD. Mother always said you should know where your docs are.
+// regardless of CWD. Used as a fallback when the KB catalog doesn't have a
+// match (or isn't loaded). Mother always said you should know where your docs
+// are.
 var DocsBaseDir = "docs/api"
 
-// loadAPIDocs reads the markdown documentation for a device integration type.
-func loadAPIDocs(integration string) string {
+// loadAPIDocs returns the markdown documentation body for a device.
+// It prefers the KB catalog (richer, from docs/devices/) and falls back to the
+// legacy docs/api/ tree keyed by integration name.
+func (s *Server) loadAPIDocs(integration, deviceType, manufacturer, model string) string {
+	if s != nil && s.KB != nil {
+		if d := s.KB.Match(integration, deviceType, manufacturer, model); d != nil {
+			return d.Body
+		}
+	}
 	if integration == "" || integration == "unknown" || integration == "generic" {
 		return ""
 	}
@@ -198,8 +207,12 @@ func (s *Server) HandleProbeDevice(w http.ResponseWriter, r *http.Request) {
 		s.probeGeneric(result, ip, stored)
 	}
 
-	// Load API documentation markdown if available
-	result.APIDocs = loadAPIDocs(result.Integration)
+	// Load API documentation markdown if available (KB-preferred, falls back to docs/api/)
+	storedModel := ""
+	if stored != nil {
+		storedModel = stored.Model
+	}
+	result.APIDocs = s.loadAPIDocs(result.Integration, deviceType, manufacturer, storedModel)
 
 	log.Printf("[probe] %s (%s): integration=%s status=%s caps=%v",
 		ip, result.Name, result.Integration, result.Status, result.Capabilities)

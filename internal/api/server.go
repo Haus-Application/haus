@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/coalson/haus/internal/ai"
 	"github.com/coalson/haus/internal/db"
 	"github.com/coalson/haus/internal/discovery"
 	"github.com/coalson/haus/internal/hue"
 	"github.com/coalson/haus/internal/kasa"
+	"github.com/coalson/haus/internal/kb"
+	"github.com/coalson/haus/internal/ws"
 )
 
 // Server holds the dependencies for HTTP handlers.
@@ -21,6 +24,25 @@ type Server struct {
 	HueClient  *hue.Client  // may be nil until paired
 	HuePoller  *hue.Poller  // may be nil until paired
 	Concierge  *ai.Concierge // may be nil if no API key configured
+
+	// KB is the device knowledge base, loaded from docs/devices/ at startup.
+	// May be nil if the KB files are missing — handlers should guard.
+	KB *kb.Catalog
+
+	// Hub is the WebSocket hub for broadcasting live events. May be nil.
+	Hub *ws.Hub
+
+	// ValidationDir is the output directory for validation reports.
+	// main.go sets this via resolveRuntimePath. Default "validation".
+	ValidationDir string
+
+	// validation run state (one run at a time)
+	validationMu      sync.Mutex
+	validationRunning bool
+	validationJobID   string
+
+	// APIKey is the Anthropic key for running validations server-side.
+	APIKey string
 
 	// Google Nest SDM OAuth config -- keep these close to the chest.
 	GoogleClientID     string
