@@ -79,8 +79,11 @@ func (p *Poller) UpdateDeviceIPs(ips []string) {
 }
 
 // GetDevices returns the last cached list of devices, or nil if no successful
-// poll has occurred yet.
+// poll has occurred yet. Safe to call on a nil receiver.
 func (p *Poller) GetDevices() []Device {
+	if p == nil {
+		return nil
+	}
 	v := p.devices.Load()
 	if v == nil {
 		return nil
@@ -91,7 +94,11 @@ func (p *Poller) GetDevices() []Device {
 
 // Refresh triggers an immediate poll and broadcast. Call this after sending
 // a command so the UI updates instantly instead of waiting for the next cycle.
+// Safe to call on a nil receiver — no-ops so handlers don't have to guard.
 func (p *Poller) Refresh() {
+	if p == nil {
+		return
+	}
 	go p.fetch()
 }
 

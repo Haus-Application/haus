@@ -41,6 +41,11 @@ type Server struct {
 	validationRunning bool
 	validationJobID   string
 
+	// kasaMu guards lazy construction of KasaPoller. Without this, two
+	// concurrent Kasa control requests right after a first-ever scan could
+	// race to create competing pollers. Mother does not allow siblings.
+	kasaMu sync.Mutex
+
 	// APIKey is the Anthropic key for running validations server-side.
 	APIKey string
 

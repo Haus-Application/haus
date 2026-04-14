@@ -5,18 +5,63 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/coalson/haus/internal/db"
 	"github.com/coalson/haus/internal/kasa"
+	"github.com/coalson/haus/internal/ws"
 )
+
+// ensureKasaPoller lazily constructs the Kasa poller the first time we need
+// it after a scan has persisted Kasa IPs to the DB. Without this, users had
+// to restart the server before toggling switches would work. Returns nil if
+// no Kasa devices are known yet; callers must be nil-safe (the poller's own
+// methods are too). Guarded by s.kasaMu so two simultaneous handler calls
+// can't race to create duplicate pollers.
+func (s *Server) ensureKasaPoller() *kasa.Poller {
+	s.kasaMu.Lock()
+	defer s.kasaMu.Unlock()
+
+	if s.KasaPoller != nil {
+		return s.KasaPoller
+	}
+
+	ips, err := db.LoadKasaIPs(s.DB)
+	if err != nil || len(ips) == 0 {
+		return nil
+	}
+
+	// Kasa poller needs a broadcaster that can emit BroadcastEvent to the
+	// WebSocket hub. Use the same adapter pattern as main.go.
+	var broadcaster kasa.Broadcaster
+	if s.Hub != nil {
+		broadcaster = &kasaHubAdapter{hub: s.Hub}
+	}
+
+	p := kasa.NewPoller(ips, broadcaster)
+	p.Start()
+	s.KasaPoller = p
+	log.Printf("[kasa] Lazy-started poller with %d device(s) from DB", len(ips))
+	return p
+}
+
+// kasaHubAdapter lets the kasa package broadcast via ws.Hub without importing it.
+type kasaHubAdapter struct{ hub *ws.Hub }
+
+func (a *kasaHubAdapter) BroadcastGlobal(event interface{}) {
+	if a == nil || a.hub == nil {
+		return
+	}
+	// kasa.BroadcastEvent has {Type, Payload}; forward as ws.BroadcastEvent.
+	if e, ok := event.(kasa.BroadcastEvent); ok {
+		a.hub.BroadcastGlobal(ws.BroadcastEvent{Type: e.Type, Payload: e.Payload})
+	}
+}
 
 // HandleKasaDevices returns the cached device list from the Kasa poller.
 //
 // GET /api/kasa/devices
 func (s *Server) HandleKasaDevices(w http.ResponseWriter, r *http.Request) {
-	if s.KasaPoller == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "Kasa not configured")
-		return
-	}
-	devices := s.KasaPoller.GetDevices()
+	poller := s.ensureKasaPoller()
+	devices := poller.GetDevices() // nil-safe
 	if devices == nil {
 		devices = []kasa.Device{}
 	}
@@ -47,7 +92,7 @@ func (s *Server) HandleKasaSetState(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadGateway, "failed to set device state")
 		return
 	}
-	s.KasaPoller.Refresh()
+	s.ensureKasaPoller().Refresh()
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -80,7 +125,7 @@ func (s *Server) HandleKasaSetBrightness(w http.ResponseWriter, r *http.Request)
 		s.writeError(w, http.StatusBadGateway, "failed to set brightness")
 		return
 	}
-	s.KasaPoller.Refresh()
+	s.ensureKasaPoller().Refresh()
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -113,6 +158,6 @@ func (s *Server) HandleKasaSetFanSpeed(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadGateway, "failed to set fan speed")
 		return
 	}
-	s.KasaPoller.Refresh()
+	s.ensureKasaPoller().Refresh()
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
